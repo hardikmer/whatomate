@@ -1069,15 +1069,7 @@ func (a *App) DeleteChatbotFlow(r *fastglue.Request) error {
 	var flowForAudit models.ChatbotFlow
 	a.DB.Where("id = ? AND organization_id = ?", id, orgID).First(&flowForAudit)
 
-	// Delete flow and steps in transaction
 	tx := a.DB.Begin()
-
-	// Delete steps first
-	if err := tx.Where("flow_id = ?", id).Delete(&models.ChatbotFlowStep{}).Error; err != nil {
-		tx.Rollback()
-		a.Log.Error("Failed to delete flow steps", "error", err)
-		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to delete flow steps", nil, "")
-	}
 
 	// Delete flow
 	result := tx.Where("id = ? AND organization_id = ?", id, orgID).Delete(&models.ChatbotFlow{})
