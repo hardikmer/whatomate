@@ -590,9 +590,20 @@ async function loadFlow() {
 
 async function loadAvailableFlows() {
   try {
-    const res = await chatbotService.listFlows({ limit: 200 })
-    const list = (res.data as any)?.data?.flows || (res.data as any)?.flows || []
-    availableFlows.value = list.map((f: any) => ({ id: f.id || f.ID, name: f.name || f.Name }))
+    // The API caps limit at 100 and treats anything larger as invalid, falling
+    // back to 50. Asking for 200 therefore returned only the 50 most recent
+    // flows, so older ones were missing from the Go to Flow target list. Page
+    // through at the documented maximum instead.
+    const all: { id: string; name: string }[] = []
+    for (let page = 1; page <= 50; page++) {
+      const res = await chatbotService.listFlows({ page, limit: 100 })
+      const data = (res.data as any)?.data ?? (res.data as any)
+      const list = data?.flows || []
+      all.push(...list.map((f: any) => ({ id: f.id || f.ID, name: f.name || f.Name })))
+      const total = Number(data?.total ?? all.length)
+      if (list.length === 0 || all.length >= total) break
+    }
+    availableFlows.value = all
   } catch {
     availableFlows.value = []
   }
