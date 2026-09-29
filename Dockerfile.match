@@ -1,0 +1,19 @@
+FROM --platform=$BUILDPLATFORM node:22-alpine AS frontend-builder
+WORKDIR /app/frontend
+COPY frontend/package.json frontend/package-lock.json ./
+RUN npm ci
+COPY frontend/ .
+RUN npm run build
+
+FROM --platform=$BUILDPLATFORM golang:1.26.0-alpine AS builder
+WORKDIR /app
+RUN apk add --no-cache git ca-certificates
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+COPY --from=frontend-builder /app/frontend/dist/ ./internal/frontend/dist/
+# match .goreleaser.yml: CGO_ENABLED=0, ldflags "-s -w", trimpath
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o whatomate ./cmd/whatomate
+
+FROM shridh0r/whatomate:0.1.1-beta-0.17
+COPY --from=builder /app/whatomate /app/whatomate
