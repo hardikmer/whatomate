@@ -65,8 +65,11 @@ import {
   Zap,
   Shield,
   LineChart,
-  Tags
+  Tags,
+  Download,
+  Loader2
 } from 'lucide-vue-next'
+import { toast } from 'vue-sonner'
 // Centralized Chart.js setup (registered once)
 import { Line, Bar, Pie } from '@/lib/charts'
 import { DateRangePicker } from '@/components/shared'
@@ -358,6 +361,32 @@ const gridLayout = ref<Array<{ i: string; x: number; y: number; w: number; h: nu
 
 const isChartWidget = (widget: DashboardWidget) => widget.display_type === 'chart'
 const isTableWidget = (widget: DashboardWidget) => widget.display_type === 'table'
+
+// Campaign widgets grouped by message_status can download the recipients behind
+// each row (sent / delivered / read / failed) for the selected date range.
+const canExportRecipients = (widget: DashboardWidget) =>
+  widget.data_source === 'campaigns' && widget.group_by_field === 'message_status'
+
+const exportingKey = ref<string | null>(null)
+
+const exportRecipients = async (widget: DashboardWidget, status: string) => {
+  exportingKey.value = `${widget.id}:${status}`
+  try {
+    const { from, to } = dateRange.value
+    const response = await widgetsService.exportRecipients(widget.id, { status, from, to })
+    const url = URL.createObjectURL(response.data as Blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `campaign_${status}_${from || 'this-month'}_to_${to || 'today'}.csv`
+    link.click()
+    URL.revokeObjectURL(url)
+  } catch (error) {
+    console.error('Failed to export recipients:', error)
+    toast.error(t('dashboard.downloadRecipientsFailed'))
+  } finally {
+    exportingKey.value = null
+  }
+}
 const isShortcutsWidget = (widget: DashboardWidget) => widget.display_type === 'shortcuts'
 const isNumberWidget = (widget: DashboardWidget) => !isChartWidget(widget) && !isTableWidget(widget) && !isShortcutsWidget(widget)
 
@@ -964,12 +993,26 @@ onMounted(() => {
                       <tr class="border-b border-white/[0.08] light:border-gray-200">
                         <th class="text-left py-2 text-xs font-medium text-white/40 light:text-gray-500 uppercase">{{ getWidgetById(item.i)!.group_by_field }}</th>
                         <th class="text-right py-2 text-xs font-medium text-white/40 light:text-gray-500 uppercase">{{ $t('dashboard.count') }}</th>
+                        <th v-if="canExportRecipients(getWidgetById(item.i)!)" class="w-8"></th>
                       </tr>
                     </thead>
                     <tbody>
                       <tr v-for="dp in widgetData[item.i]?.data_points" :key="dp.label" class="border-b border-white/[0.04] light:border-gray-100">
                         <td class="py-2 text-sm text-white/70 light:text-gray-700">{{ dp.label }}</td>
                         <td class="py-2 text-sm text-right text-white light:text-gray-900 font-medium">{{ dp.value }}</td>
+                        <td v-if="canExportRecipients(getWidgetById(item.i)!)" class="py-2 pl-2 text-right">
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            class="h-6 w-6 text-white/30 hover:text-white hover:bg-white/[0.1] light:text-gray-400 light:hover:text-gray-700 light:hover:bg-gray-100"
+                            :disabled="!dp.value || exportingKey === `${item.i}:${dp.label}`"
+                            :title="$t('dashboard.downloadRecipients')"
+                            @click.stop="exportRecipients(getWidgetById(item.i)!, dp.label)"
+                          >
+                            <Loader2 v-if="exportingKey === `${item.i}:${dp.label}`" class="h-3 w-3 animate-spin" />
+                            <Download v-else class="h-3 w-3" />
+                          </Button>
+                        </td>
                       </tr>
                     </tbody>
                   </table>

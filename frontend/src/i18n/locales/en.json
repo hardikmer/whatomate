@@ -1487,6 +1487,8 @@
     "hoursAgo": "{count}h ago",
     "daysAgo": "{count}d ago",
     "count": "Count",
+    "downloadRecipients": "Download these recipients as CSV",
+    "downloadRecipientsFailed": "Could not download recipients",
     "shortcuts": "Shortcuts",
     "selectShortcuts": "Select shortcuts",
     "startChat": "Start Chat",

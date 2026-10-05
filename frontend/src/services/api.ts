@@ -697,6 +697,8 @@ export const widgetsService = {
   delete: (id: string) => api.delete(`/widgets/${id}`),
   getAllData: (params?: { from?: string; to?: string }) =>
     api.get<{ data: Record<string, WidgetData> }>('/widgets/data', { params }),
+  exportRecipients: (id: string, params: { status: string; from?: string; to?: string }) =>
+    api.get<Blob>(`/widgets/${id}/export`, { params, responseType: 'blob' }),
   getDataSources: () => api.get<{
     data_sources: DataSourceInfo[]
     metrics: string[]

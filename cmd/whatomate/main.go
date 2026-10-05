@@ -782,6 +782,7 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 	g.PUT("/api/widgets/{id}", app.UpdateWidget)
 	g.DELETE("/api/widgets/{id}", app.DeleteWidget)
 	g.GET("/api/widgets/{id}/data", app.GetWidgetData)
+	g.GET("/api/widgets/{id}/export", app.ExportWidgetCampaignRecipients)
 	g.POST("/api/widgets/layout", app.SaveWidgetLayout)
 
 	// Organization Settings
