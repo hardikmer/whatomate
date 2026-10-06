@@ -8,7 +8,8 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
 import { toast } from 'vue-sonner'
-import { MessageSquare, Loader2 } from 'lucide-vue-next'
+import { Loader2 } from 'lucide-vue-next'
+import ggLogo from '@/assets/gg-logo.svg'
 
 const { t } = useI18n()
 const router = useRouter()
@@ -69,9 +70,7 @@ const handleRegister = async () => {
     <Card class="w-full max-w-md">
       <CardHeader class="space-y-1 text-center">
         <div class="flex justify-center mb-4">
-          <div class="h-12 w-12 rounded-xl bg-primary flex items-center justify-center">
-            <MessageSquare class="h-7 w-7 text-primary-foreground" />
-          </div>
+          <img :src="ggLogo" alt="Global Garner" class="h-12 w-12" />
         </div>
         <CardTitle class="text-2xl font-bold">{{ $t('auth.createAccount') }}</CardTitle>
         <CardDescription>

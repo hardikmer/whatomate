@@ -1152,6 +1152,7 @@ func (a *App) getCampaignMessageStatusData(orgID uuid.UUID, filters []FilterInpu
 		{Label: "sent", Value: float64(counts.Sent)},
 		{Label: "delivered", Value: float64(counts.Delivered)},
 		{Label: "read", Value: float64(counts.ReadCount)},
+		{Label: "engaged", Value: float64(a.campaignEngagedCount(orgID, filters, start, end))}, // widget_export.go
 		{Label: "failed", Value: float64(counts.Failed)},
 	}
 }
@@ -1283,13 +1284,16 @@ func (a *App) getCampaignMessageStatusTimeSeries(orgID uuid.UUID, filters []Filt
 	sentData := make([]float64, len(rows))
 	deliveredData := make([]float64, len(rows))
 	readData := make([]float64, len(rows))
+	engagedData := make([]float64, len(rows))
 	failedData := make([]float64, len(rows))
+	engagedByDay := a.campaignEngagedByDay(orgID, filters, start, end) // widget_export.go
 
 	for i, row := range rows {
 		labels[i] = row.Date.Format("Jan 02")
 		sentData[i] = float64(row.Sent)
 		deliveredData[i] = float64(row.Delivered)
 		readData[i] = float64(row.ReadCount)
+		engagedData[i] = float64(engagedByDay[row.Date.Format("2006-01-02")])
 		failedData[i] = float64(row.Failed)
 	}
 
@@ -1298,6 +1302,7 @@ func (a *App) getCampaignMessageStatusTimeSeries(orgID uuid.UUID, filters []Filt
 		{Label: "sent", Data: sentData},
 		{Label: "delivered", Data: deliveredData},
 		{Label: "read", Data: readData},
+		{Label: "engaged", Data: engagedData},
 		{Label: "failed", Data: failedData},
 	}
 
