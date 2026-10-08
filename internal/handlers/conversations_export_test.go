@@ -73,9 +73,18 @@ func TestApp_ExportConversations(t *testing.T) {
 		models.JSONB{"campaign_id": campaign.ID.String()})
 	msg(org.ID, replier.ID, models.DirectionIncoming, "Interested", now.Add(-30*time.Minute), &sent.ID, nil)
 
-	// Only messaged by us in the period: did not interact.
+	// Got the campaign, never replied: campaign, not engaged.
 	silent := testutil.CreateTestContactWith(t, app.DB, org.ID, testutil.WithContactAccount(account.Name))
-	msg(org.ID, silent.ID, models.DirectionOutgoing, "campaign", now.Add(-time.Hour), nil, nil)
+	msg(org.ID, silent.ID, models.DirectionOutgoing, "campaign", now.Add(-4*time.Hour), nil,
+		models.JSONB{"campaign_id": campaign.ID.String()})
+	// An agent wrote first (not a campaign), no reply: team, not engaged.
+	teamOnly := testutil.CreateTestContactWith(t, app.DB, org.ID, testutil.WithContactAccount(account.Name))
+	msg(org.ID, teamOnly.ID, models.DirectionOutgoing, "following up", now.Add(-5*time.Hour), nil, nil)
+	// The campaign send failed: never reached, must not appear at all.
+	failed := testutil.CreateTestContactWith(t, app.DB, org.ID, testutil.WithContactAccount(account.Name))
+	fm := msg(org.ID, failed.ID, models.DirectionOutgoing, "campaign", now.Add(-time.Hour), nil,
+		models.JSONB{"campaign_id": campaign.ID.String()})
+	require.NoError(t, app.DB.Model(fm).Update("status", models.MessageStatusFailed).Error)
 	// Wrote in, but only before the period.
 	lapsed := testutil.CreateTestContactWith(t, app.DB, org.ID, testutil.WithContactAccount(account.Name))
 	msg(org.ID, lapsed.ID, models.DirectionIncoming, "old", old, nil, nil)
@@ -84,11 +93,14 @@ func TestApp_ExportConversations(t *testing.T) {
 	otherContact := testutil.CreateTestContact(t, app.DB, other.ID)
 	msg(other.ID, otherContact.ID, models.DirectionIncoming, "hi", now.Add(-time.Hour), nil, nil)
 
-	call := func(userID uuid.UUID) (int, [][]string) {
+	call := func(userID uuid.UUID, filters map[string]string) (int, [][]string) {
 		req := testutil.NewGETRequest(t)
 		testutil.SetAuthContext(req, org.ID, userID)
 		testutil.SetQueryParam(req, "from", now.AddDate(0, 0, -1).Format("2006-01-02"))
 		testutil.SetQueryParam(req, "to", now.Format("2006-01-02"))
+		for k, v := range filters {
+			testutil.SetQueryParam(req, k, v)
+		}
 		require.NoError(t, app.ExportConversations(req))
 		code := testutil.GetResponseStatusCode(req)
 		if code != fasthttp.StatusOK {
@@ -96,31 +108,59 @@ func TestApp_ExportConversations(t *testing.T) {
 		}
 		return code, csvDataRows(t, testutil.GetResponseBody(req))
 	}
+	phones := func(rows [][]string) []string {
+		var out []string
+		for _, r := range rows {
+			out = append(out, r[1])
+		}
+		return out
+	}
 
-	code, rows := call(user.ID)
+	code, rows := call(user.ID, nil)
 	require.Equal(t, fasthttp.StatusOK, code)
-	require.Len(t, rows, 2, "only the two contacts who wrote in during the period")
+	require.Equal(t, []string{replier.PhoneNumber, organic.PhoneNumber, silent.PhoneNumber, teamOnly.PhoneNumber}, phones(rows),
+		"everyone reached in the period, most recent activity first; failed, lapsed and other-org excluded")
 
 	byPhone := map[string][]string{}
 	for _, r := range rows {
 		byPhone[r[1]] = r
 	}
+	// Columns: 3 started by, 4 engaged, 8 from customer, 9 to customer, 10 campaign, 13 last message.
 	o := byPhone[organic.PhoneNumber]
-	require.NotNil(t, o)
-	assert.Equal(t, "2", o[5], "messages from customer, in period only")
-	assert.Equal(t, "1", o[6], "messages sent to customer")
-	assert.Equal(t, "", o[7], "organic chat has no campaign")
-	assert.Equal(t, "price please", o[10], "last customer message")
-
+	assert.Equal(t, []string{"Customer", "Yes", "2", "1", "", "price please"}, []string{o[3], o[4], o[8], o[9], o[10], o[13]})
 	c := byPhone[replier.PhoneNumber]
-	require.NotNil(t, c)
-	assert.Equal(t, "1", c[5])
-	assert.Equal(t, "Diwali Offer", c[7], "campaign they replied to")
-	assert.Equal(t, rows[0][1], replier.PhoneNumber, "most recent interaction first")
+	assert.Equal(t, []string{"Campaign", "Yes", "1", "1", "Diwali Offer", "Interested"}, []string{c[3], c[4], c[8], c[9], c[10], c[13]})
+	sl := byPhone[silent.PhoneNumber]
+	assert.Equal(t, []string{"Campaign", "No", "0", "1", ""}, []string{sl[3], sl[4], sl[8], sl[9], sl[5]})
+	tm := byPhone[teamOnly.PhoneNumber]
+	assert.Equal(t, []string{"Team", "No"}, []string{tm[3], tm[4]})
+
+	for name, tc := range map[string]struct {
+		filters map[string]string
+		want    []string
+	}{
+		"engaged":                      {map[string]string{"engagement": "engaged"}, []string{replier.PhoneNumber, organic.PhoneNumber}},
+		"not engaged":                  {map[string]string{"engagement": "not_engaged"}, []string{silent.PhoneNumber, teamOnly.PhoneNumber}},
+		"campaign":                     {map[string]string{"started_by": "campaign"}, []string{replier.PhoneNumber, silent.PhoneNumber}},
+		"customer":                     {map[string]string{"started_by": "customer"}, []string{organic.PhoneNumber}},
+		"team":                         {map[string]string{"started_by": "team"}, []string{teamOnly.PhoneNumber}},
+		"campaign, engaged":            {map[string]string{"started_by": "campaign", "engagement": "engaged"}, []string{replier.PhoneNumber}},
+		"campaign, no reply":           {map[string]string{"started_by": "campaign", "engagement": "not_engaged"}, []string{silent.PhoneNumber}},
+		"all is the same as no filter": {map[string]string{"started_by": "all", "engagement": "all"}, phones(rows)},
+	} {
+		t.Run(name, func(t *testing.T) {
+			code, got := call(user.ID, tc.filters)
+			require.Equal(t, fasthttp.StatusOK, code)
+			assert.Equal(t, tc.want, phones(got))
+		})
+	}
+
+	code, _ = call(user.ID, map[string]string{"engagement": "maybe"})
+	assert.Equal(t, fasthttp.StatusBadRequest, code, "unknown filter value")
 
 	noPermRole := testutil.CreateTestRole(t, app.DB, org.ID, "no-export", getAnalyticsPermissions(t, app))
 	noPermUser := testutil.CreateTestUser(t, app.DB, org.ID,
 		testutil.WithEmail(testutil.UniqueEmail("conv-noperm")), testutil.WithRoleID(&noPermRole.ID))
-	code, _ = call(noPermUser.ID)
+	code, _ = call(noPermUser.ID, nil)
 	assert.Equal(t, fasthttp.StatusForbidden, code, "needs contacts:export")
 }

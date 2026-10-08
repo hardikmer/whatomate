@@ -104,6 +104,7 @@ import CallButton from '@/components/calling/CallButton.vue'
 import { useNotesStore } from '@/stores/notes'
 import { useHeaderMedia } from '@/composables/useHeaderMedia'
 import { CreateContactDialog, DateRangePicker } from '@/components/shared'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { useDateRange } from '@/composables/useDateRange'
 import HeaderMediaUpload from '@/components/shared/HeaderMediaUpload.vue'
 import { Info } from 'lucide-vue-next'
@@ -125,6 +126,8 @@ const canExportConversations = authStore.hasPermission('contacts', 'export')
 // Conversations report: everyone who wrote in during a period, campaign or not.
 const isExportDialogOpen = ref(false)
 const isExportingConversations = ref(false)
+const exportEngagement = ref<'all' | 'engaged' | 'not_engaged'>('all')
+const exportStartedBy = ref<'all' | 'campaign' | 'customer' | 'team'>('all')
 const {
   selectedRange: exportRange,
   customDateRange: exportCustomRange,
@@ -138,11 +141,17 @@ async function exportConversations() {
   isExportingConversations.value = true
   try {
     const { from, to } = exportDateRange.value
-    const response = await contactsService.exportConversations({ from, to })
+    const response = await contactsService.exportConversations({
+      from,
+      to,
+      engagement: exportEngagement.value,
+      started_by: exportStartedBy.value,
+    })
     const url = URL.createObjectURL(response.data as Blob)
     const link = document.createElement('a')
     link.href = url
-    link.download = `conversations_${from || 'this-month'}_to_${to || 'today'}.csv`
+    const parts = [exportStartedBy.value, exportEngagement.value].filter(v => v !== 'all')
+    link.download = `conversations_${[...parts, from || 'this-month', 'to', to || 'today'].join('_')}.csv`
     link.click()
     URL.revokeObjectURL(url)
     isExportDialogOpen.value = false
@@ -2874,14 +2883,43 @@ async function sendMediaMessage() {
           <DialogTitle>{{ $t('chat.downloadConversations') }}</DialogTitle>
           <DialogDescription>{{ $t('chat.downloadConversationsDescription') }}</DialogDescription>
         </DialogHeader>
-        <div class="flex items-center gap-2">
-          <DateRangePicker
-            v-model:selected-range="exportRange"
-            v-model:custom-date-range="exportCustomRange"
-            v-model:is-date-picker-open="isExportDatePickerOpen"
-            :format-date-range-display="formatExportRange"
-            @apply-custom="applyExportCustomRange"
-          />
+        <div class="grid gap-3">
+          <div class="grid gap-1.5">
+            <span class="text-sm font-medium">{{ $t('chat.conversationsPeriod') }}</span>
+            <DateRangePicker
+              v-model:selected-range="exportRange"
+              v-model:custom-date-range="exportCustomRange"
+              v-model:is-date-picker-open="isExportDatePickerOpen"
+              :format-date-range-display="formatExportRange"
+              @apply-custom="applyExportCustomRange"
+            />
+          </div>
+          <div class="grid grid-cols-2 gap-3">
+            <div class="grid gap-1.5">
+              <span class="text-sm font-medium">{{ $t('chat.conversationsEngagement') }}</span>
+              <Select v-model="exportEngagement">
+                <SelectTrigger class="w-full"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">{{ $t('chat.conversationsAll') }}</SelectItem>
+                  <SelectItem value="engaged">{{ $t('chat.conversationsEngaged') }}</SelectItem>
+                  <SelectItem value="not_engaged">{{ $t('chat.conversationsNotEngaged') }}</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div class="grid gap-1.5">
+              <span class="text-sm font-medium">{{ $t('chat.conversationsStartedBy') }}</span>
+              <Select v-model="exportStartedBy">
+                <SelectTrigger class="w-full"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">{{ $t('chat.conversationsAll') }}</SelectItem>
+                  <SelectItem value="campaign">{{ $t('chat.conversationsStartedByCampaign') }}</SelectItem>
+                  <SelectItem value="customer">{{ $t('chat.conversationsStartedByCustomer') }}</SelectItem>
+                  <SelectItem value="team">{{ $t('chat.conversationsStartedByTeam') }}</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <p class="text-xs text-muted-foreground">{{ $t('chat.conversationsHelp') }}</p>
         </div>
         <div class="flex justify-end gap-2">
           <Button variant="outline" @click="isExportDialogOpen = false">{{ $t('common.cancel') }}</Button>
