@@ -79,7 +79,8 @@ func TestApp_ExportConversations(t *testing.T) {
 		models.JSONB{"campaign_id": campaign.ID.String()})
 	// An agent wrote first (not a campaign), no reply: team, not engaged.
 	teamOnly := testutil.CreateTestContactWith(t, app.DB, org.ID, testutil.WithContactAccount(account.Name))
-	msg(org.ID, teamOnly.ID, models.DirectionOutgoing, "following up", now.Add(-5*time.Hour), nil, nil)
+	tmImg := msg(org.ID, teamOnly.ID, models.DirectionOutgoing, "", now.Add(-5*time.Hour), nil, nil)
+	require.NoError(t, app.DB.Model(tmImg).Update("message_type", models.MessageTypeImage).Error)
 	// The campaign send failed: never reached, must not appear at all.
 	failed := testutil.CreateTestContactWith(t, app.DB, org.ID, testutil.WithContactAccount(account.Name))
 	fm := msg(org.ID, failed.ID, models.DirectionOutgoing, "campaign", now.Add(-time.Hour), nil,
@@ -125,15 +126,19 @@ func TestApp_ExportConversations(t *testing.T) {
 	for _, r := range rows {
 		byPhone[r[1]] = r
 	}
-	// Columns: 3 started by, 4 engaged, 8 from customer, 9 to customer, 10 campaign, 13 last message.
+	// Columns: 3 started by, 4 engaged, 8 from customer, 9 to customer, 10 campaign,
+	// 13 first message, 14 first customer message, 15 last customer message.
 	o := byPhone[organic.PhoneNumber]
-	assert.Equal(t, []string{"Customer", "Yes", "2", "1", "", "price please"}, []string{o[3], o[4], o[8], o[9], o[10], o[13]})
+	assert.Equal(t, []string{"Customer", "Yes", "2", "1", "", "hi", "hi", "price please"},
+		[]string{o[3], o[4], o[8], o[9], o[10], o[13], o[14], o[15]}, "the message before the period is not the first")
 	c := byPhone[replier.PhoneNumber]
-	assert.Equal(t, []string{"Campaign", "Yes", "1", "1", "Diwali Offer", "Interested"}, []string{c[3], c[4], c[8], c[9], c[10], c[13]})
+	assert.Equal(t, []string{"Campaign", "Yes", "1", "1", "Diwali Offer", "campaign", "Interested", "Interested"},
+		[]string{c[3], c[4], c[8], c[9], c[10], c[13], c[14], c[15]})
 	sl := byPhone[silent.PhoneNumber]
-	assert.Equal(t, []string{"Campaign", "No", "0", "1", ""}, []string{sl[3], sl[4], sl[8], sl[9], sl[5]})
+	assert.Equal(t, []string{"Campaign", "No", "0", "1", "", "campaign", ""},
+		[]string{sl[3], sl[4], sl[8], sl[9], sl[5], sl[13], sl[14]})
 	tm := byPhone[teamOnly.PhoneNumber]
-	assert.Equal(t, []string{"Team", "No"}, []string{tm[3], tm[4]})
+	assert.Equal(t, []string{"Team", "No", "[image]"}, []string{tm[3], tm[4], tm[13]}, "media without text shows its type")
 
 	for name, tc := range map[string]struct {
 		filters map[string]string

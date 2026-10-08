@@ -21,6 +21,10 @@ var conversationEngagementFilter = map[string]string{
 	"not_engaged": "from_customer = 0",
 }
 
+// messageText is a message's text for the report, or its type in brackets
+// ("[image]") when it has none, so media messages don't show as blank cells.
+const messageText = "COALESCE(NULLIF(fm.content, ''), '[' || fm.message_type || ']')"
+
 var conversationStartedByFilter = map[string]string{
 	"campaign": "started_by = 'Campaign'",
 	"customer": "started_by = 'Customer'",
@@ -78,19 +82,21 @@ func (a *App) ExportConversations(r *fastglue.Request) error {
 	}
 
 	type row struct {
-		ProfileName     string
-		PhoneNumber     string
-		WhatsAppAccount string
-		StartedBy       string
-		FirstIn         *time.Time
-		LastIn          *time.Time
-		LastOut         *time.Time
-		FromCustomer    int64
-		ToCustomer      int64
-		Campaigns       string
-		AssignedTo      string
-		Tags            string
-		LastMessage     string
+		ProfileName          string
+		PhoneNumber          string
+		WhatsAppAccount      string
+		StartedBy            string
+		FirstIn              *time.Time
+		LastIn               *time.Time
+		LastOut              *time.Time
+		FromCustomer         int64
+		ToCustomer           int64
+		Campaigns            string
+		AssignedTo           string
+		Tags                 string
+		FirstMessage         string
+		FirstCustomerMessage string
+		LastMessage          string
 	}
 
 	// per: one row per contact with a message in the period, failed sends
@@ -135,16 +141,28 @@ func (a *App) ExportConversations(r *fastglue.Request) error {
 		       COALESCE(u.full_name, '') AS assigned_to,
 		       COALESCE(k.tags::text, '[]') AS tags,
 		       COALESCE((
-		           SELECT lm.content FROM messages lm
-		           WHERE lm.contact_id = k.id AND lm.direction = 'incoming'
-		             AND lm.created_at >= ? AND lm.created_at <= ?
-		           ORDER BY lm.created_at DESC LIMIT 1
+		           SELECT `+messageText+` FROM messages fm
+		           WHERE fm.contact_id = k.id AND fm.created_at >= ? AND fm.created_at <= ?
+		             AND NOT (fm.direction = 'outgoing' AND fm.status = 'failed')
+		           ORDER BY fm.created_at LIMIT 1
+		       ), '') AS first_message,
+		       COALESCE((
+		           SELECT `+messageText+` FROM messages fm
+		           WHERE fm.contact_id = k.id AND fm.direction = 'incoming'
+		             AND fm.created_at >= ? AND fm.created_at <= ?
+		           ORDER BY fm.created_at LIMIT 1
+		       ), '') AS first_customer_message,
+		       COALESCE((
+		           SELECT `+messageText+` FROM messages fm
+		           WHERE fm.contact_id = k.id AND fm.direction = 'incoming'
+		             AND fm.created_at >= ? AND fm.created_at <= ?
+		           ORDER BY fm.created_at DESC LIMIT 1
 		       ), '') AS last_message
 		FROM classified k
 		LEFT JOIN users u ON u.id = k.assigned_user_id
 		WHERE `+strings.Join(where, " AND ")+`
 		ORDER BY GREATEST(k.last_in, k.last_out) DESC`,
-		start, end, orgID, start, end, start, end).Scan(&rows).Error; err != nil {
+		start, end, orgID, start, end, start, end, start, end, start, end).Scan(&rows).Error; err != nil {
 		a.Log.Error("Failed to export conversations", "error", err)
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to export conversations", nil, "")
 	}
@@ -161,7 +179,7 @@ func (a *App) ExportConversations(r *fastglue.Request) error {
 	w := csv.NewWriter(&buf)
 	_ = w.Write([]string{"Name", "Phone", "WhatsApp number", "Started by", "Engaged",
 		"First customer message (UTC)", "Last customer message (UTC)", "Last message to customer (UTC)",
-		"Messages from customer", "Messages sent to customer", "Replied to campaign", "Assigned to", "Tags", "Last customer message"})
+		"Messages from customer", "Messages sent to customer", "Replied to campaign", "Assigned to", "Tags", "First message", "First customer message", "Last customer message"})
 	for _, rw := range rows {
 		name, phone := rw.ProfileName, rw.PhoneNumber
 		if mask {
@@ -177,7 +195,8 @@ func (a *App) ExportConversations(r *fastglue.Request) error {
 		record := []string{name, phone, rw.WhatsAppAccount, rw.StartedBy, engaged,
 			stamp(rw.FirstIn), stamp(rw.LastIn), stamp(rw.LastOut),
 			strconv.FormatInt(rw.FromCustomer, 10), strconv.FormatInt(rw.ToCustomer, 10),
-			rw.Campaigns, rw.AssignedTo, strings.Join(tags, ", "), rw.LastMessage}
+			rw.Campaigns, rw.AssignedTo, strings.Join(tags, ", "),
+			rw.FirstMessage, rw.FirstCustomerMessage, rw.LastMessage}
 		// Same CSV-injection guard as the other exports: '=' and '@' start a
 		// formula in spreadsheets. '+' and '-' are left alone (phone numbers).
 		for i, cell := range record {
