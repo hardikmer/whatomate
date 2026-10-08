@@ -102,7 +102,8 @@ import ConversationNotes from '@/components/chat/ConversationNotes.vue'
 import CallButton from '@/components/calling/CallButton.vue'
 import { useNotesStore } from '@/stores/notes'
 import { useHeaderMedia } from '@/composables/useHeaderMedia'
-import { CreateContactDialog } from '@/components/shared'
+import { CreateContactDialog, DateRangePicker } from '@/components/shared'
+import { useDateRange } from '@/composables/useDateRange'
 import HeaderMediaUpload from '@/components/shared/HeaderMediaUpload.vue'
 import { Info } from 'lucide-vue-next'
 
@@ -118,6 +119,39 @@ const notesStore = useNotesStore()
 const { isDark } = useColorMode()
 
 const canWriteContacts = authStore.hasPermission('contacts', 'write')
+const canExportConversations = authStore.hasPermission('contacts', 'export')
+
+// Conversations report: everyone who wrote in during a period, campaign or not.
+const isExportDialogOpen = ref(false)
+const isExportingConversations = ref(false)
+const {
+  selectedRange: exportRange,
+  customDateRange: exportCustomRange,
+  isDatePickerOpen: isExportDatePickerOpen,
+  dateRange: exportDateRange,
+  formatDateRangeDisplay: formatExportRange,
+  applyCustomRange: applyExportCustomRange,
+} = useDateRange({ storageKey: 'conversations-export' })
+
+async function exportConversations() {
+  isExportingConversations.value = true
+  try {
+    const { from, to } = exportDateRange.value
+    const response = await contactsService.exportConversations({ from, to })
+    const url = URL.createObjectURL(response.data as Blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `conversations_${from || 'this-month'}_to_${to || 'today'}.csv`
+    link.click()
+    URL.revokeObjectURL(url)
+    isExportDialogOpen.value = false
+  } catch (error) {
+    console.error('Failed to export conversations:', error)
+    toast.error(t('chat.downloadConversationsFailed'))
+  } finally {
+    isExportingConversations.value = false
+  }
+}
 
 const messageInput = ref('')
 const messagesEndRef = ref<HTMLElement | null>(null)
@@ -1722,6 +1756,21 @@ async function sendMediaMessage() {
             </TooltipTrigger>
             <TooltipContent>{{ $t('chat.addContact') }}</TooltipContent>
           </Tooltip>
+          <!-- Conversations report -->
+          <Tooltip v-if="canExportConversations">
+            <TooltipTrigger as-child>
+              <Button
+                variant="ghost"
+                size="icon"
+                :aria-label="$t('chat.downloadConversations')"
+                class="h-8 w-8 shrink-0 text-white/40 hover:text-white hover:bg-white/[0.08] light:text-gray-500 light:hover:text-gray-900 light:hover:bg-gray-100"
+                @click="isExportDialogOpen = true"
+              >
+                <Download class="h-4 w-4" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>{{ $t('chat.downloadConversations') }}</TooltipContent>
+          </Tooltip>
           <!-- Tag Filter -->
           <Popover v-model:open="isTagFilterOpen">
             <PopoverTrigger as-child>
@@ -2813,6 +2862,33 @@ async function sendMediaMessage() {
               <span v-else>{{ $t('chat.send') }}</span>
             </Button>
           </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+
+    <!-- Conversations report -->
+    <Dialog v-model:open="isExportDialogOpen">
+      <DialogContent class="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>{{ $t('chat.downloadConversations') }}</DialogTitle>
+          <DialogDescription>{{ $t('chat.downloadConversationsDescription') }}</DialogDescription>
+        </DialogHeader>
+        <div class="flex items-center gap-2">
+          <DateRangePicker
+            v-model:selected-range="exportRange"
+            v-model:custom-date-range="exportCustomRange"
+            v-model:is-date-picker-open="isExportDatePickerOpen"
+            :format-date-range-display="formatExportRange"
+            @apply-custom="applyExportCustomRange"
+          />
+        </div>
+        <div class="flex justify-end gap-2">
+          <Button variant="outline" @click="isExportDialogOpen = false">{{ $t('common.cancel') }}</Button>
+          <Button :disabled="isExportingConversations" @click="exportConversations">
+            <Loader2 v-if="isExportingConversations" class="h-4 w-4 mr-2 animate-spin" />
+            <Download v-else class="h-4 w-4 mr-2" />
+            {{ $t('common.download') }}
+          </Button>
         </div>
       </DialogContent>
     </Dialog>

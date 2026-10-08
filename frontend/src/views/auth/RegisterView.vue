@@ -9,7 +9,7 @@ import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
 import { toast } from 'vue-sonner'
 import { Loader2 } from 'lucide-vue-next'
-import ggLogo from '@/assets/gg-logo.svg'
+import logo from '@/assets/convoza-mark.png'
 
 const { t } = useI18n()
 const router = useRouter()
@@ -70,7 +70,7 @@ const handleRegister = async () => {
     <Card class="w-full max-w-md">
       <CardHeader class="space-y-1 text-center">
         <div class="flex justify-center mb-4">
-          <img :src="ggLogo" alt="Global Garner" class="h-12 w-12" />
+          <img :src="logo" alt="Convoza" class="h-12 w-12" />
         </div>
         <CardTitle class="text-2xl font-bold">{{ $t('auth.createAccount') }}</CardTitle>
         <CardDescription>

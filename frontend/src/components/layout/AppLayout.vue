@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import ggLogo from '@/assets/gg-logo.svg'
+import logo from '@/assets/convoza-mark.png'
 import { ref, computed, onMounted } from 'vue'
 import { RouterLink, RouterView, useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
@@ -110,8 +110,8 @@ const handleLogout = async () => {
     <!-- Mobile header -->
     <header class="fixed top-0 left-0 right-0 z-50 flex h-12 items-center justify-between border-b border-white/[0.08] light:border-gray-200 bg-[#0a0a0b]/95 light:bg-white/95 backdrop-blur-sm px-3 md:hidden">
       <RouterLink to="/" class="flex items-center gap-2">
-        <img :src="ggLogo" alt="Global Garner" class="h-7 w-7 shrink-0" />
-        <span class="font-semibold text-sm text-white light:text-gray-900">Global Garner</span>
+        <img :src="logo" alt="Convoza" class="h-7 w-7 shrink-0" />
+        <span class="font-semibold text-sm text-white light:text-gray-900">Convoza</span>
       </RouterLink>
       <Button
         variant="ghost"
@@ -148,12 +148,12 @@ const handleLogout = async () => {
       <!-- Logo (hidden on mobile, shown in header instead) -->
       <div class="hidden md:flex h-12 items-center justify-between px-3 border-b border-white/[0.08] light:border-gray-200">
         <RouterLink to="/" class="flex items-center gap-2">
-          <img :src="ggLogo" alt="Global Garner" class="h-7 w-7 shrink-0" />
+          <img :src="logo" alt="Convoza" class="h-7 w-7 shrink-0" />
           <span
             v-if="!isCollapsed"
             class="font-semibold text-sm text-white light:text-gray-900"
           >
-            Global Garner
+            Convoza
           </span>
         </RouterLink>
         <Button

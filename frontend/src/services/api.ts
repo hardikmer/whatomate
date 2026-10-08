@@ -192,6 +192,8 @@ export const contactsService = {
   list: (params?: { search?: string; page?: number; limit?: number; tags?: string }) =>
     api.get('/contacts', { params }),
   get: (id: string) => api.get(`/contacts/${id}`),
+  exportConversations: (params: { from?: string; to?: string }) =>
+    api.get<Blob>('/conversations/export', { params, responseType: 'blob' }),
   create: (data: any) => api.post('/contacts', data),
   update: (id: string, data: any) => api.put(`/contacts/${id}`, data),
   delete: (id: string) => api.delete(`/contacts/${id}`),

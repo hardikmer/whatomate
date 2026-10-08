@@ -10,7 +10,7 @@ import { Label } from '@/components/ui/label'
 import { Separator } from '@/components/ui/separator'
 import { toast } from 'vue-sonner'
 import { Loader2 } from 'lucide-vue-next'
-import ggLogo from '@/assets/gg-logo.svg'
+import logo from '@/assets/convoza-mark.png'
 
 const { t } = useI18n()
 
@@ -97,7 +97,7 @@ const initiateSSO = (provider: string) => {
     <div class="w-full max-w-md rounded-2xl border border-white/[0.08] bg-white/[0.02] backdrop-blur light:bg-white light:border-gray-200 light:shadow-xl">
       <div class="p-8 space-y-1 text-center">
         <div class="flex justify-center mb-4">
-          <img :src="ggLogo" alt="Global Garner" class="h-12 w-12" />
+          <img :src="logo" alt="Convoza" class="h-12 w-12" />
         </div>
         <h2 class="text-2xl font-bold text-white light:text-gray-900">{{ $t('auth.welcomeTitle') }}</h2>
         <p class="text-white/50 light:text-gray-500">
