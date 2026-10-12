@@ -226,6 +226,14 @@ func (a *App) unreadCountsByContact(contacts []models.Contact) map[uuid.UUID]int
 	return counts
 }
 
+// seesOnlyAssignedContacts reports whether scopeAssignedContact restricts this
+// user to their own contacts. A contact such a user adds is assigned to them,
+// because an unassigned one would vanish from their list the moment it is
+// saved and stay hidden until an admin assigned it.
+func (a *App) seesOnlyAssignedContacts(userID, orgID uuid.UUID) bool {
+	return !a.HasPermission(userID, models.ResourceContacts, models.ActionRead, orgID)
+}
+
 // scopeAssignedContact narrows a contact query for users who lack the
 // contacts:read permission: they may only access contacts assigned to them
 // (assigned_user_id) or contacts with an active agent transfer to them. With
@@ -1407,6 +1415,10 @@ func (a *App) CreateContact(r *fastglue.Request) error {
 			if req.Metadata != nil {
 				updates["metadata"] = models.JSONB(req.Metadata)
 			}
+			// Left alone if it still belongs to another agent from before it was deleted.
+			if existingContact.AssignedUserID == nil && a.seesOnlyAssignedContacts(userID, orgID) {
+				updates["assigned_user_id"] = userID
+			}
 			if len(updates) > 0 {
 				a.DB.Model(&existingContact).Updates(updates)
 			}
@@ -1436,6 +1448,10 @@ func (a *App) CreateContact(r *fastglue.Request) error {
 
 	if req.Metadata != nil {
 		contact.Metadata = models.JSONB(req.Metadata)
+	}
+
+	if a.seesOnlyAssignedContacts(userID, orgID) {
+		contact.AssignedUserID = &userID
 	}
 
 	if err := a.DB.Create(&contact).Error; err != nil {
