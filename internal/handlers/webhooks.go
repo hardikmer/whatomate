@@ -15,6 +15,25 @@ import (
 	"github.com/zerodha/fastglue"
 )
 
+// allowedInternalHosts are hostnames the operator explicitly allows webhooks
+// and custom actions to reach despite resolving to private addresses.
+var allowedInternalHosts map[string]bool
+
+// SetAllowedInternalHosts sets the allowlist from a comma-separated list.
+func SetAllowedInternalHosts(list string) {
+	m := map[string]bool{}
+	for _, h := range strings.Split(list, ",") {
+		if h = strings.ToLower(strings.TrimSpace(h)); h != "" {
+			m[h] = true
+		}
+	}
+	allowedInternalHosts = m
+}
+
+func isAllowedInternalHost(host string) bool {
+	return allowedInternalHosts[strings.ToLower(host)]
+}
+
 // validateWebhookURL performs structural validation of a webhook URL.
 // It blocks known-internal hostnames and IP literals pointing to private ranges.
 // Runtime SSRF protection (DNS rebinding) is handled by SSRFSafeDialer.
@@ -31,6 +50,9 @@ func validateWebhookURL(rawURL string) error {
 	hostname := u.Hostname()
 	if hostname == "" {
 		return fmt.Errorf("URL must have a hostname")
+	}
+	if isAllowedInternalHost(hostname) {
+		return nil
 	}
 
 	// Block obvious internal hostnames
@@ -60,6 +82,9 @@ func SSRFSafeDialer() func(ctx context.Context, network, addr string) (net.Conn,
 		host, port, err := net.SplitHostPort(addr)
 		if err != nil {
 			return nil, err
+		}
+		if isAllowedInternalHost(host) {
+			return dialer.DialContext(ctx, network, addr)
 		}
 
 		ips, err := net.DefaultResolver.LookupHost(ctx, host)

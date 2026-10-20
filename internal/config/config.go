@@ -29,6 +29,15 @@ type Config struct {
 	Cookie       CookieConfig       `koanf:"cookie"`
 	Calling      CallingConfig      `koanf:"calling"`
 	TTS          TTSConfig          `koanf:"tts"`
+	Webhooks     WebhooksConfig     `koanf:"webhooks"`
+}
+
+// WebhooksConfig controls outgoing webhook and custom-action HTTP calls.
+type WebhooksConfig struct {
+	// Comma-separated hostnames (e.g. "n8n") that may be called even though
+	// they resolve to private addresses -- for integrations on the same
+	// Docker network. Everything else private stays blocked (SSRF guard).
+	AllowedInternalHosts string `koanf:"allowed_internal_hosts"`
 }
 
 type TTSConfig struct {

@@ -187,6 +187,7 @@ func runServer(args []string) {
 	lo.Info("WebSocket hub started")
 
 	// Initialize app with dependencies
+	handlers.SetAllowedInternalHosts(cfg.Webhooks.AllowedInternalHosts)
 	// Shared HTTP client with connection pooling for external API calls
 	httpClient := &http.Client{
 		Timeout: 30 * time.Second,
