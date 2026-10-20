@@ -442,7 +442,10 @@
     "urlButtonParamPlaceholder": "Enter dynamic URL value",
     "preview": "Preview",
     "serviceWindowExpired": "The 24-hour messaging window has expired. Only template messages can be sent until the customer replies.",
-    "sendTemplateAction": "Send Template"
+    "sendTemplateAction": "Send Template",
+    "downloadConversations": "Download conversations report",
+    "downloadConversationsDescription": "Everyone who messaged you in the selected period, from campaigns or on their own, with message counts, campaigns they replied to and their last message.",
+    "downloadConversationsFailed": "Failed to download the conversations report"
   },
   "contacts": {
     "title": "Contacts",
