@@ -1213,6 +1213,34 @@ func (a *App) saveAndFinalizeTransfer(transfer *models.AgentTransfer, account *m
 	// Broadcast to WebSocket
 	a.broadcastTransferCreated(transfer, contact)
 
+	// Automatic transfers (AI, keyword, flow, queue) fire the webhook too, so
+	// an integration can alert a human; manual ones dispatch in
+	// CreateAgentTransfer. With no notes, the reason is the contact's last
+	// message, which is usually what needs a human.
+	reason := transfer.Notes
+	if reason == "" {
+		var last models.Message
+		if err := a.DB.Where("contact_id = ? AND direction = ?", contact.ID, models.DirectionIncoming).
+			Order("created_at DESC").First(&last).Error; err == nil {
+			reason = last.Content
+		}
+	}
+	var agentID *string
+	if transfer.AgentID != nil {
+		s := transfer.AgentID.String()
+		agentID = &s
+	}
+	a.DispatchWebhook(account.OrganizationID, models.WebhookEventTransferCreated, TransferEventData{
+		TransferID:      transfer.ID.String(),
+		ContactID:       contact.ID.String(),
+		ContactPhone:    contact.PhoneNumber,
+		ContactName:     contact.ProfileName,
+		Source:          transfer.Source,
+		Reason:          reason,
+		AgentID:         agentID,
+		WhatsAppAccount: transfer.WhatsAppAccount,
+	})
+
 	return nil
 }
 
