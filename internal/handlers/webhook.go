@@ -170,27 +170,23 @@ func (a *App) WebhookHandler(r *fastglue.Request) error {
 		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Invalid payload", nil, "")
 	}
 
-	// Verify webhook signature before processing any fields.
-	// Find a phoneNumberID from any change to look up the account's AppSecret.
-	if len(signature) > 0 {
-		for _, entry := range payload.Entry {
-			for _, change := range entry.Changes {
-				phoneNumberID := change.Value.Metadata.PhoneNumberID
-				if phoneNumberID == "" {
-					continue
-				}
-				account, err := a.getWhatsAppAccountCached(phoneNumberID)
-				if err != nil || account.AppSecret == "" {
-					continue
-				}
-				if !verifyWebhookSignature(body, signature, []byte(account.AppSecret)) {
-					a.Log.Warn("Invalid webhook signature", "phone_id", phoneNumberID)
-					return r.SendErrorEnvelope(fasthttp.StatusForbidden, "Invalid signature", nil, "")
-				}
-				a.Log.Debug("Webhook signature verified successfully")
+	// Verify webhook signature before processing any fields. Once an app
+	// secret is known (on the account or globally), the signature is
+	// mandatory: the endpoint is public, and an unsigned POST must not be
+	// able to inject inbound messages that trigger replies.
+	if secrets := a.webhookAppSecrets(&payload); len(secrets) > 0 {
+		valid := false
+		for _, secret := range secrets {
+			if verifyWebhookSignature(body, signature, secret) {
+				valid = true
 				break
 			}
 		}
+		if !valid {
+			a.Log.Warn("Invalid or missing webhook signature", "has_signature", len(signature) > 0)
+			return r.SendErrorEnvelope(fasthttp.StatusForbidden, "Invalid signature", nil, "")
+		}
+		a.Log.Debug("Webhook signature verified successfully")
 	}
 
 	// Process each entry
@@ -548,6 +544,36 @@ func (a *App) processTemplateStatusUpdate(wabaID, event, templateName, templateL
 			)
 		}
 	}
+}
+
+// webhookAppSecrets returns the app secrets a webhook payload may be signed
+// with: those of the accounts its changes reference, plus the global
+// whatsapp.app_secret. Changes without a phone number ID (e.g. template
+// status updates) are covered by the global secret.
+func (a *App) webhookAppSecrets(payload *WebhookPayload) [][]byte {
+	var secrets [][]byte
+	seen := map[string]bool{}
+	add := func(s string) {
+		if s != "" && !seen[s] {
+			seen[s] = true
+			secrets = append(secrets, []byte(s))
+		}
+	}
+	for _, entry := range payload.Entry {
+		for _, change := range entry.Changes {
+			phoneNumberID := change.Value.Metadata.PhoneNumberID
+			if phoneNumberID == "" {
+				continue
+			}
+			if account, err := a.getWhatsAppAccountCached(phoneNumberID); err == nil {
+				add(account.AppSecret)
+			}
+		}
+	}
+	if a.Config != nil {
+		add(a.Config.WhatsApp.AppSecret)
+	}
+	return secrets
 }
 
 // verifyWebhookSignature verifies the X-Hub-Signature-256 header from Meta.

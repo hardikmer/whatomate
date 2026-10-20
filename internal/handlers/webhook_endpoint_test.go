@@ -243,6 +243,56 @@ func TestApp_WebhookHandler_InvalidSignature_Rejected(t *testing.T) {
 		"invalid signature must be rejected before any processing")
 }
 
+func TestApp_WebhookHandler_MissingSignature_RejectedWhenAccountHasSecret(t *testing.T) {
+	// An unsigned POST must not bypass verification just by omitting the header.
+	app := newAppForWebhook(t, "")
+	org := testutil.CreateTestOrganization(t, app.DB)
+	acc := &models.WhatsAppAccount{
+		BaseModel:          models.BaseModel{ID: uuid.New()},
+		OrganizationID:     org.ID,
+		Name:               "wbk-h-5",
+		PhoneID:            "phone-E",
+		BusinessID:         "biz-E",
+		AccessToken:        "tok",
+		AppSecret:          "real-secret",
+		WebhookVerifyToken: "vt",
+		APIVersion:         "v18.0",
+		Status:             "active",
+	}
+	require.NoError(t, app.DB.Create(acc).Error)
+
+	req := testutil.NewRequest(t)
+	req.RequestCtx.Request.Header.SetMethod("POST")
+	req.RequestCtx.Request.Header.SetContentType("application/json")
+	req.RequestCtx.Request.SetBody(makeMessagesPayload("phone-E"))
+
+	require.NoError(t, app.WebhookHandler(req))
+	assert.Equal(t, fasthttp.StatusForbidden, testutil.GetResponseStatusCode(req))
+}
+
+func TestApp_WebhookHandler_GlobalSecret_EnforcedForUnknownPhone(t *testing.T) {
+	// With whatsapp.app_secret set, every POST must be signed, including ones
+	// whose phone number ID matches no account.
+	app := newAppForWebhook(t, "")
+	app.Config.WhatsApp.AppSecret = "global-secret"
+	body := makeMessagesPayload("phone-unknown")
+
+	unsigned := testutil.NewRequest(t)
+	unsigned.RequestCtx.Request.Header.SetMethod("POST")
+	unsigned.RequestCtx.Request.Header.SetContentType("application/json")
+	unsigned.RequestCtx.Request.SetBody(body)
+	require.NoError(t, app.WebhookHandler(unsigned))
+	assert.Equal(t, fasthttp.StatusForbidden, testutil.GetResponseStatusCode(unsigned))
+
+	signed := testutil.NewRequest(t)
+	signed.RequestCtx.Request.Header.SetMethod("POST")
+	signed.RequestCtx.Request.Header.SetContentType("application/json")
+	signed.RequestCtx.Request.Header.Set("X-Hub-Signature-256", signWebhook(body, "global-secret"))
+	signed.RequestCtx.Request.SetBody(body)
+	require.NoError(t, app.WebhookHandler(signed))
+	assert.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(signed))
+}
+
 func TestApp_WebhookHandler_MalformedJSONRejected(t *testing.T) {
 	app := newAppForWebhook(t, "")
 
