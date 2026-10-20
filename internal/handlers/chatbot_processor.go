@@ -367,15 +367,21 @@ func (a *App) processIncomingMessageFull(phoneNumberID string, msg IncomingTextM
 	if settings.AI.Enabled && settings.AI.Provider != "" && settings.AI.APIKey != "" {
 		a.Log.Info("Attempting AI response", "provider", settings.AI.Provider, "model", settings.AI.Model)
 		aiResponse, err := a.generateAIResponse(settings, session, messageText)
+		aiResponse, handoff := extractAIHandoff(aiResponse)
 		if err != nil {
 			a.Log.Error("AI response failed", "error", err, "provider", settings.AI.Provider, "model", settings.AI.Model)
 			// Fall through to default response
-		} else if aiResponse != "" {
-			a.Log.Info("AI response generated successfully", "response_length", len(aiResponse))
-			if err := a.sendAndSaveTextMessage(account, contact, aiResponse); err != nil {
-				a.Log.Error("Failed to send AI response", "error", err, "contact", contact.PhoneNumber)
+		} else if aiResponse != "" || handoff {
+			a.Log.Info("AI response generated successfully", "response_length", len(aiResponse), "handoff", handoff)
+			if aiResponse != "" {
+				if err := a.sendAndSaveTextMessage(account, contact, aiResponse); err != nil {
+					a.Log.Error("Failed to send AI response", "error", err, "contact", contact.PhoneNumber)
+				}
+				a.logSessionMessage(session.ID, models.DirectionOutgoing, aiResponse, "ai_response")
 			}
-			a.logSessionMessage(session.ID, models.DirectionOutgoing, aiResponse, "ai_response")
+			if handoff {
+				a.createTransferToQueue(account, contact, models.TransferSourceAI)
+			}
 			return
 		} else {
 			a.Log.Warn("AI returned empty response")
@@ -828,6 +834,17 @@ func (a *App) generateAIResponse(settings *models.ChatbotSettings, session *mode
 	// Build context from AIContext entries
 	contextData := a.buildAIContext(settings.OrganizationID, session, userMessage)
 
+	// Tell the model where the contact is from (country code) without
+	// sending their full number to the AI provider.
+	if session != nil && session.PhoneNumber != "" {
+		contact := "### Contact\nWhatsApp number (masked): " + maskPhoneKeepCountryCode(session.PhoneNumber)
+		if contextData != "" {
+			contextData = contact + "\n\n" + contextData
+		} else {
+			contextData = contact
+		}
+	}
+
 	switch settings.AI.Provider {
 	case models.AIProviderOpenAI:
 		return a.generateOpenAIResponse(settings, session, userMessage, contextData)
@@ -1269,6 +1286,41 @@ func (a *App) generateGoogleResponse(settings *models.ChatbotSettings, session *
 }
 
 // getSessionHistory retrieves recent messages from the session
+// aiHandoffMarker is the token a system prompt can tell the model to emit when
+// a human should take over. It is stripped before the reply is sent.
+const aiHandoffMarker = "[HANDOFF]"
+
+// extractAIHandoff removes every handoff marker from an AI reply and reports
+// whether one was present.
+func extractAIHandoff(response string) (string, bool) {
+	upper := strings.ToUpper(response)
+	if !strings.Contains(upper, aiHandoffMarker) {
+		return response, false
+	}
+	var b strings.Builder
+	for {
+		i := strings.Index(strings.ToUpper(response), aiHandoffMarker)
+		if i < 0 {
+			b.WriteString(response)
+			break
+		}
+		b.WriteString(response[:i])
+		response = response[i+len(aiHandoffMarker):]
+	}
+	return strings.TrimSpace(b.String()), true
+}
+
+// maskPhoneKeepCountryCode keeps the leading digits (country code) and the last
+// two, unlike utils.MaskPhoneNumber which hides the country code,
+// e.g. "917202999989" -> "+9172******89".
+func maskPhoneKeepCountryCode(phone string) string {
+	digits := strings.TrimPrefix(phone, "+")
+	if len(digits) <= 6 {
+		return "+" + strings.Repeat("*", len(digits))
+	}
+	return "+" + digits[:4] + strings.Repeat("*", len(digits)-6) + digits[len(digits)-2:]
+}
+
 func (a *App) getSessionHistory(sessionID uuid.UUID, limit int) []models.ChatbotSessionMessage {
 	var messages []models.ChatbotSessionMessage
 	a.DB.Where("session_id = ?", sessionID).

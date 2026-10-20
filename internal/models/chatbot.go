@@ -302,7 +302,7 @@ type AgentTransfer struct {
 	WhatsAppAccount     string         `gorm:"size:100;index;not null" json:"whatsapp_account"` // References WhatsAppAccount.Name
 	PhoneNumber         string         `gorm:"size:50;not null" json:"phone_number"`
 	Status              TransferStatus `gorm:"size:20;default:'active'" json:"status"` // active, resumed
-	Source              TransferSource `gorm:"size:20;default:'manual'" json:"source"` // manual, flow, keyword, chatbot_disabled
+	Source              TransferSource `gorm:"size:20;default:'manual'" json:"source"` // manual, flow, keyword, chatbot_disabled, ai
 	AgentID             *uuid.UUID     `gorm:"type:uuid" json:"agent_id,omitempty"`
 	TeamID              *uuid.UUID     `gorm:"type:uuid;index" json:"team_id,omitempty"`          // Team queue (null = general queue)
 	TransferredByUserID *uuid.UUID     `gorm:"type:uuid" json:"transferred_by_user_id,omitempty"` // User who initiated the transfer (null for system)
