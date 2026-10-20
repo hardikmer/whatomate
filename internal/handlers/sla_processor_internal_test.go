@@ -288,3 +288,50 @@ func TestSLAEscalationFiresWhenNoAgentResponse(t *testing.T) {
 	assert.Equal(t, 1, updated.SLA.EscalationLevel, "escalation level should increase to 1")
 	require.NotNil(t, updated.SLA.EscalatedAt)
 }
+
+// createTestOutgoingMessage creates an outgoing message with the given metadata
+// and no sending user (a bot reply, or an echo from the WhatsApp Business app).
+func createTestOutgoingMessage(t *testing.T, app *App, orgID, contactID uuid.UUID, accountName string, sentAt time.Time, metadata models.JSONB) {
+	t.Helper()
+	msg := &models.Message{
+		BaseModel:       models.BaseModel{ID: uuid.New(), CreatedAt: sentAt},
+		OrganizationID:  orgID,
+		ContactID:       contactID,
+		WhatsAppAccount: accountName,
+		Direction:       models.DirectionOutgoing,
+		MessageType:     models.MessageTypeText,
+		Content:         "reply",
+		Status:          models.MessageStatusSent,
+		Metadata:        metadata,
+	}
+	require.NoError(t, app.DB.Create(msg).Error)
+}
+
+func TestAgentRespondedSince_BusinessAppEchoCountsWithoutAgent(t *testing.T) {
+	app := newSLATestApp(t)
+	org := testutil.CreateTestOrganization(t, app.DB)
+	contact := testutil.CreateTestContact(t, app.DB, org.ID)
+	account := testutil.CreateTestWhatsAppAccount(t, app.DB, org.ID)
+
+	createTestOutgoingMessage(t, app, org.ID, contact.ID, account.Name, time.Now().Add(-5*time.Minute),
+		models.JSONB{"source": messageSourceBusinessApp})
+
+	proc := NewSLAProcessor(app, time.Minute)
+	transfer := models.AgentTransfer{ContactID: contact.ID}
+	assert.True(t, proc.agentRespondedSince(transfer, time.Now().Add(-10*time.Minute)),
+		"a reply typed in the WhatsApp Business app is a human reply")
+}
+
+func TestAgentRespondedSince_BotReplyDoesNotCount(t *testing.T) {
+	app := newSLATestApp(t)
+	org := testutil.CreateTestOrganization(t, app.DB)
+	contact := testutil.CreateTestContact(t, app.DB, org.ID)
+	agent := testutil.CreateTestUser(t, app.DB, org.ID)
+	account := testutil.CreateTestWhatsAppAccount(t, app.DB, org.ID)
+
+	createTestOutgoingMessage(t, app, org.ID, contact.ID, account.Name, time.Now().Add(-5*time.Minute), models.JSONB{})
+
+	proc := NewSLAProcessor(app, time.Minute)
+	transfer := models.AgentTransfer{ContactID: contact.ID, AgentID: &agent.ID}
+	assert.False(t, proc.agentRespondedSince(transfer, time.Now().Add(-10*time.Minute)))
+}

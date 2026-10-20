@@ -387,16 +387,20 @@ func (p *SLAProcessor) customerLastSpokeAt(transfer models.AgentTransfer) time.T
 // after the given timestamp. This is used to detect active agent conversations
 // so that SLA deadlines can be extended instead of firing warnings/auto-close.
 func (p *SLAProcessor) agentRespondedSince(transfer models.AgentTransfer, since time.Time) bool {
-	if transfer.AgentID == nil {
-		return false
+	q := p.app.DB.Model(&models.Message{}).
+		Where("contact_id = ? AND direction = ? AND created_at > ?",
+			transfer.ContactID, models.DirectionOutgoing, since)
+
+	// A reply typed in the WhatsApp Business app (coexistence echo) is a
+	// human reply too, whether or not the transfer has an assigned agent.
+	if transfer.AgentID != nil {
+		q = q.Where("(sent_by_user_id = ? OR metadata->>'source' = ?)", *transfer.AgentID, messageSourceBusinessApp)
+	} else {
+		q = q.Where("metadata->>'source' = ?", messageSourceBusinessApp)
 	}
 
 	var count int64
-	p.app.DB.Model(&models.Message{}).
-		Where("contact_id = ? AND sent_by_user_id = ? AND direction = ? AND created_at > ?",
-			transfer.ContactID, *transfer.AgentID, models.DirectionOutgoing, since,
-		).Count(&count)
-
+	q.Count(&count)
 	return count > 0
 }
 

@@ -638,6 +638,10 @@ func (a *App) processMarketingPreference(phoneNumberID, userPhone, bsuid, value 
 	)
 }
 
+// messageSourceBusinessApp marks messages echoed from the WhatsApp Business
+// app (coexistence) in Message.Metadata["source"].
+const messageSourceBusinessApp = "business_app"
+
 // processMessageEcho handles mirroring of messages sent from the mobile WhatsApp Business App.
 func (a *App) processMessageEcho(phoneNumberID string, msg IncomingTextMessage) {
 	defer func() {
@@ -700,6 +704,9 @@ func (a *App) processMessageEcho(phoneNumberID string, msg IncomingTextMessage) 
 		MessageType:       models.MessageType(messageType),
 		Content:           messageText,
 		Status:            models.MessageStatusSent,
+		// Typed by a person in the WhatsApp Business app (coexistence), so
+		// the SLA processor counts it as a human reply.
+		Metadata: models.JSONB{"source": messageSourceBusinessApp},
 	}
 
 	// Reply context
