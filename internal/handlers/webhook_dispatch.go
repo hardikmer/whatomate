@@ -60,6 +60,16 @@ type TransferEventData struct {
 	WhatsAppAccount string                `json:"whatsapp_account"`
 }
 
+// AIActionEventData is sent with ai.action: one structured action the AI
+// reported in a reply, plus who it concerns.
+type AIActionEventData struct {
+	ContactID       string         `json:"contact_id"`
+	ContactPhone    string         `json:"contact_phone"`
+	ContactName     string         `json:"contact_name"`
+	WhatsAppAccount string         `json:"whatsapp_account"`
+	Action          map[string]any `json:"action"`
+}
+
 // maxConcurrentWebhooks limits the number of concurrent webhook deliveries per dispatch
 const maxConcurrentWebhooks = 10
 

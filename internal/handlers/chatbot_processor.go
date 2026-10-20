@@ -367,6 +367,7 @@ func (a *App) processIncomingMessageFull(phoneNumberID string, msg IncomingTextM
 	if settings.AI.Enabled && settings.AI.Provider != "" && settings.AI.APIKey != "" {
 		a.Log.Info("Attempting AI response", "provider", settings.AI.Provider, "model", settings.AI.Model)
 		aiResponse, err := a.generateAIResponse(settings, session, messageText)
+		aiResponse, actions := extractAIActions(aiResponse)
 		aiResponse, handoff := extractAIHandoff(aiResponse)
 		if err != nil {
 			a.Log.Error("AI response failed", "error", err, "provider", settings.AI.Provider, "model", settings.AI.Model)
@@ -378,6 +379,15 @@ func (a *App) processIncomingMessageFull(phoneNumberID string, msg IncomingTextM
 					a.Log.Error("Failed to send AI response", "error", err, "contact", contact.PhoneNumber)
 				}
 				a.logSessionMessage(session.ID, models.DirectionOutgoing, aiResponse, "ai_response")
+			}
+			for _, action := range actions {
+				a.DispatchWebhook(account.OrganizationID, models.WebhookEventAIAction, AIActionEventData{
+					ContactID:       contact.ID.String(),
+					ContactPhone:    contact.PhoneNumber,
+					ContactName:     contact.ProfileName,
+					WhatsAppAccount: account.Name,
+					Action:          action,
+				})
 			}
 			if handoff {
 				a.createTransferToQueue(account, contact, models.TransferSourceAI)
@@ -1288,6 +1298,32 @@ func (a *App) generateGoogleResponse(settings *models.ChatbotSettings, session *
 }
 
 // getSessionHistory retrieves recent messages from the session
+// aiActionMarker matches [[ACTION {...}]] blocks a system prompt can ask the
+// model to append, e.g. [[ACTION {"type":"demo_booked","slot":"Sun 11am"}]].
+// They are stripped from the reply and dispatched as ai.action webhooks.
+var aiActionMarker = regexp.MustCompile(`(?s)\[\[ACTION\s*(\{.*?\})\s*\]\]`)
+
+// extractAIActions removes every action block from an AI reply and returns the
+// parsed actions. Blocks whose JSON doesn't parse (or has no "type") are
+// dropped from the reply but not returned.
+func extractAIActions(response string) (string, []map[string]any) {
+	var actions []map[string]any
+	cleaned := aiActionMarker.ReplaceAllStringFunc(response, func(block string) string {
+		m := aiActionMarker.FindStringSubmatch(block)
+		var action map[string]any
+		if len(m) == 2 && json.Unmarshal([]byte(m[1]), &action) == nil {
+			if t, ok := action["type"].(string); ok && t != "" {
+				actions = append(actions, action)
+			}
+		}
+		return ""
+	})
+	if len(actions) == 0 && cleaned == response {
+		return response, nil
+	}
+	return strings.TrimSpace(cleaned), actions
+}
+
 // aiHandoffMarker is the token a system prompt can tell the model to emit when
 // a human should take over. It is stripped before the reply is sent.
 const aiHandoffMarker = "[HANDOFF]"

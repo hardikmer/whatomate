@@ -62,3 +62,35 @@ func TestMaskPhoneKeepCountryCode(t *testing.T) {
 	assert.Equal(t, "+1631*****81", maskPhoneKeepCountryCode("+16315551181"))
 	assert.Equal(t, "+*****", maskPhoneKeepCountryCode("12345"))
 }
+
+func TestExtractAIActions(t *testing.T) {
+	t.Parallel()
+
+	in := "Done, Aarav's seat is booked for Sunday 11 AM.\n[[ACTION {\"type\":\"demo_booked\",\"child_name\":\"Aarav\",\"demo_datetime\":\"2026-10-25T11:00:00+05:30\"}]]"
+	got, actions := extractAIActions(in)
+	assert.Equal(t, "Done, Aarav's seat is booked for Sunday 11 AM.", got)
+	if assert.Len(t, actions, 1) {
+		assert.Equal(t, "demo_booked", actions[0]["type"])
+		assert.Equal(t, "Aarav", actions[0]["child_name"])
+	}
+
+	// Several blocks, plus the handoff marker, survive in order.
+	got, actions = extractAIActions("Thanks! [[ACTION {\"type\":\"wants_to_pay\"}]]\n[[ACTION {\"type\":\"demo_interested\"}]]\n[HANDOFF]")
+	assert.Contains(t, got, "Thanks!")
+	assert.Contains(t, got, "[HANDOFF]")
+	assert.NotContains(t, got, "ACTION")
+	assert.Len(t, actions, 2)
+	got, handoff := extractAIHandoff(got)
+	assert.Equal(t, "Thanks!", got)
+	assert.True(t, handoff)
+
+	// Broken JSON or a missing type is stripped but not dispatched.
+	got, actions = extractAIActions("Hi [[ACTION {not json}]] there [[ACTION {\"child\":\"x\"}]]")
+	assert.Equal(t, "Hi  there", got)
+	assert.Empty(t, actions)
+
+	// No markers: unchanged.
+	got, actions = extractAIActions("Plain reply")
+	assert.Equal(t, "Plain reply", got)
+	assert.Nil(t, actions)
+}

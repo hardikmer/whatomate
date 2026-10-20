@@ -219,6 +219,7 @@ const (
 	WebhookEventTransferCreated  WebhookEvent = "transfer.created"
 	WebhookEventTransferResumed  WebhookEvent = "transfer.resumed"
 	WebhookEventTransferAssigned WebhookEvent = "transfer.assigned"
+	WebhookEventAIAction         WebhookEvent = "ai.action"
 )
 
 // ActionType represents custom action types
