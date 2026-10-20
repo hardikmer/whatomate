@@ -834,15 +834,17 @@ func (a *App) generateAIResponse(settings *models.ChatbotSettings, session *mode
 	// Build context from AIContext entries
 	contextData := a.buildAIContext(settings.OrganizationID, session, userMessage)
 
-	// Tell the model where the contact is from (country code) without
-	// sending their full number to the AI provider.
+	// Tell the model today's date (so prompts can say "until <date>") and
+	// where the contact is from (country code), without sending their full
+	// number to the AI provider.
+	contact := "### Contact\nToday: " + time.Now().Format("Monday, 2 January 2006")
 	if session != nil && session.PhoneNumber != "" {
-		contact := "### Contact\nWhatsApp number (masked): " + maskPhoneKeepCountryCode(session.PhoneNumber)
-		if contextData != "" {
-			contextData = contact + "\n\n" + contextData
-		} else {
-			contextData = contact
-		}
+		contact += "\nWhatsApp number (masked): " + maskPhoneKeepCountryCode(session.PhoneNumber)
+	}
+	if contextData != "" {
+		contextData = contact + "\n\n" + contextData
+	} else {
+		contextData = contact
 	}
 
 	switch settings.AI.Provider {
