@@ -49,7 +49,23 @@ func seedCampaign(t *testing.T, app *handlers.App, orgID, templateID, userID uui
 	require.NoError(t, app.DB.Create(c).Error)
 
 	now := time.Now()
-	add := func(phone string, status models.MessageStatus, sent, delivered, read bool) {
+	contact := testutil.CreateTestContact(t, app.DB, orgID)
+	message := func(dir models.Direction, typ models.MessageType, waID, content string, replyTo *uuid.UUID) *models.Message {
+		m := &models.Message{
+			BaseModel:         models.BaseModel{ID: uuid.New()},
+			OrganizationID:    orgID,
+			WhatsAppAccount:   account,
+			ContactID:         contact.ID,
+			Direction:         dir,
+			MessageType:       typ,
+			Content:           content,
+			WhatsAppMessageID: waID,
+			ReplyToMessageID:  replyTo,
+		}
+		require.NoError(t, app.DB.Create(m).Error)
+		return m
+	}
+	add := func(phone string, status models.MessageStatus, sent, delivered, read bool) string {
 		r := &models.BulkMessageRecipient{
 			BaseModel:     models.BaseModel{ID: uuid.New()},
 			CampaignID:    c.ID,
@@ -59,6 +75,7 @@ func seedCampaign(t *testing.T, app *handlers.App, orgID, templateID, userID uui
 		}
 		if sent {
 			r.SentAt = &now
+			r.WhatsAppMessageID = "wamid." + uuid.New().String()
 		}
 		if delivered {
 			r.DeliveredAt = &now
@@ -67,13 +84,21 @@ func seedCampaign(t *testing.T, app *handlers.App, orgID, templateID, userID uui
 			r.ReadAt = &now
 		}
 		require.NoError(t, app.DB.Create(r).Error)
+		return r.WhatsAppMessageID
 	}
-	add("919000000001", models.MessageStatusRead, true, true, true)       // r1 sent, delivered, read
-	add("919000000002", models.MessageStatusDelivered, true, true, false) // r2 sent, delivered
+	r1 := add("919000000001", models.MessageStatusRead, true, true, true)  // r1 sent, delivered, read
+	r2 := add("919000000002", models.MessageStatusDelivered, true, true, false) // r2 sent, delivered
 	add("919000000003", models.MessageStatusSent, true, false, false)     // r3 sent
 	add("919000000004", models.MessageStatusFailed, false, false, false)  // r4 failed at send
 	add("919000000005", models.MessageStatusFailed, true, false, false)   // r5 sent, then failed
 	add("919000000006", models.MessageStatusPending, false, false, false) // r6 not sent yet
+
+	// r1 taps a reply button on the campaign message: engaged.
+	sent1 := message(models.DirectionOutgoing, models.MessageTypeTemplate, r1, "campaign", nil)
+	message(models.DirectionIncoming, models.MessageType("button_reply"), "wamid.in."+uuid.New().String(), "Interested", &sent1.ID)
+	// r2 writes in, but not as a reply to the campaign message: not engaged.
+	message(models.DirectionOutgoing, models.MessageTypeTemplate, r2, "campaign", nil)
+	message(models.DirectionIncoming, models.MessageTypeText, "wamid.in."+uuid.New().String(), "hello", nil)
 	return c
 }
 
@@ -143,7 +168,7 @@ func TestApp_ExportWidgetCampaignRecipients_RowsMatchWidgetNumbers(t *testing.T)
 	for _, dp := range resp.Data.DataPoints {
 		shown[dp.Label] = int(dp.Value)
 	}
-	require.Equal(t, map[string]int{"sent": 4, "delivered": 2, "read": 1, "failed": 2}, shown)
+	require.Equal(t, map[string]int{"sent": 4, "delivered": 2, "read": 1, "engaged": 1, "failed": 2}, shown)
 
 	// What each download contains must equal that number.
 	for status, want := range shown {
@@ -156,8 +181,11 @@ func TestApp_ExportWidgetCampaignRecipients_RowsMatchWidgetNumbers(t *testing.T)
 			testutil.SetQueryParam(req, "to", to)
 			require.NoError(t, app.ExportWidgetCampaignRecipients(req))
 			require.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(req))
-			assert.Equal(t, want, len(csvDataRows(t, testutil.GetResponseBody(req))),
-				"CSV rows for %q must equal the number on the widget", status)
+			rows := csvDataRows(t, testutil.GetResponseBody(req))
+			assert.Equal(t, want, len(rows), "CSV rows for %q must equal the number on the widget", status)
+			if status == "engaged" && len(rows) == 1 {
+				assert.Equal(t, "Interested", rows[0][7], "Reply column carries what the customer tapped")
+			}
 		})
 	}
 }
