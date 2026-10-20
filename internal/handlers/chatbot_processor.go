@@ -990,7 +990,7 @@ func (a *App) generateChatCompletionsResponse(settings *models.ChatbotSettings, 
 
 	// Add conversation history if enabled
 	if settings.AI.IncludeHistory && session != nil {
-		history := a.getSessionHistory(session.ID, settings.AI.HistoryLimit)
+		history := a.getAIHistory(session.ID, settings.AI.HistoryLimit, userMessage)
 		for _, msg := range history {
 			role := "user"
 			if msg.Direction == models.DirectionOutgoing {
@@ -1077,7 +1077,7 @@ func (a *App) generateAnthropicResponse(settings *models.ChatbotSettings, sessio
 
 	// Add conversation history if enabled
 	if settings.AI.IncludeHistory && session != nil {
-		history := a.getSessionHistory(session.ID, settings.AI.HistoryLimit)
+		history := a.getAIHistory(session.ID, settings.AI.HistoryLimit, userMessage)
 		for _, msg := range history {
 			role := "user"
 			if msg.Direction == models.DirectionOutgoing {
@@ -1182,7 +1182,7 @@ func (a *App) generateGoogleResponse(settings *models.ChatbotSettings, session *
 
 	// Add conversation history if enabled
 	if settings.AI.IncludeHistory && session != nil {
-		history := a.getSessionHistory(session.ID, settings.AI.HistoryLimit)
+		history := a.getAIHistory(session.ID, settings.AI.HistoryLimit, userMessage)
 		for _, msg := range history {
 			role := "user"
 			if msg.Direction == models.DirectionOutgoing {
@@ -1319,6 +1319,26 @@ func maskPhoneKeepCountryCode(phone string) string {
 		return "+" + strings.Repeat("*", len(digits))
 	}
 	return "+" + digits[:4] + strings.Repeat("*", len(digits)-6) + digits[len(digits)-2:]
+}
+
+// getAIHistory returns session history for an AI request. The incoming
+// message is logged to the session before the AI is called, and every
+// provider appends it again as the current turn, so drop that trailing copy
+// rather than sending the user's message twice.
+func (a *App) getAIHistory(sessionID uuid.UUID, limit int, userMessage string) []models.ChatbotSessionMessage {
+	return trimCurrentMessage(a.getSessionHistory(sessionID, limit+1), userMessage, limit)
+}
+
+// trimCurrentMessage drops a trailing incoming message equal to userMessage
+// and caps the result at the last limit entries.
+func trimCurrentMessage(history []models.ChatbotSessionMessage, userMessage string, limit int) []models.ChatbotSessionMessage {
+	if n := len(history); n > 0 && history[n-1].Direction == models.DirectionIncoming && history[n-1].Message == userMessage {
+		history = history[:n-1]
+	}
+	if len(history) > limit {
+		history = history[len(history)-limit:]
+	}
+	return history
 }
 
 func (a *App) getSessionHistory(sessionID uuid.UUID, limit int) []models.ChatbotSessionMessage {

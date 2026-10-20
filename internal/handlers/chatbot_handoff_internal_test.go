@@ -3,6 +3,7 @@ package handlers
 import (
 	"testing"
 
+	"github.com/shridarpatil/whatomate/internal/models"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -30,6 +31,28 @@ func TestExtractAIHandoff(t *testing.T) {
 			assert.Equal(t, tt.wantFlag, flag)
 		})
 	}
+}
+
+func TestTrimCurrentMessage(t *testing.T) {
+	t.Parallel()
+
+	in := func(m string) models.ChatbotSessionMessage {
+		return models.ChatbotSessionMessage{Direction: models.DirectionIncoming, Message: m}
+	}
+	out := func(m string) models.ChatbotSessionMessage {
+		return models.ChatbotSessionMessage{Direction: models.DirectionOutgoing, Message: m}
+	}
+
+	// The just-logged incoming message is dropped; the limit still applies.
+	got := trimCurrentMessage([]models.ChatbotSessionMessage{in("hi"), out("hello"), in("price?")}, "price?", 4)
+	assert.Equal(t, []models.ChatbotSessionMessage{in("hi"), out("hello")}, got)
+
+	got = trimCurrentMessage([]models.ChatbotSessionMessage{in("a"), out("b"), in("c"), out("d"), in("now")}, "now", 2)
+	assert.Equal(t, []models.ChatbotSessionMessage{in("c"), out("d")}, got)
+
+	// Nothing to drop when the last entry is not the current message.
+	got = trimCurrentMessage([]models.ChatbotSessionMessage{in("hi"), out("hello")}, "price?", 4)
+	assert.Equal(t, []models.ChatbotSessionMessage{in("hi"), out("hello")}, got)
 }
 
 func TestMaskPhoneKeepCountryCode(t *testing.T) {
