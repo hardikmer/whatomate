@@ -835,6 +835,8 @@ func (a *App) generateAIResponse(settings *models.ChatbotSettings, session *mode
 		return a.generateAnthropicResponse(settings, session, userMessage, contextData)
 	case models.AIProviderGoogle:
 		return a.generateGoogleResponse(settings, session, userMessage, contextData)
+	case models.AIProviderOpenRouter:
+		return a.generateChatCompletionsResponse(settings, session, userMessage, contextData, openRouterChatURL, "OpenRouter")
 	default:
 		return "", fmt.Errorf("unsupported AI provider: %s", settings.AI.Provider)
 	}
@@ -933,10 +935,21 @@ func (a *App) fetchAPIContext(apiConfig models.JSONB, session *models.ChatbotSes
 	return string(respBody), nil
 }
 
+const (
+	openAIChatURL     = "https://api.openai.com/v1/chat/completions"
+	openRouterChatURL = "https://openrouter.ai/api/v1/chat/completions"
+)
+
 // generateOpenAIResponse generates a response using OpenAI API
 func (a *App) generateOpenAIResponse(settings *models.ChatbotSettings, session *models.ChatbotSession, userMessage string, contextData string) (string, error) {
-	url := "https://api.openai.com/v1/chat/completions"
+	return a.generateChatCompletionsResponse(settings, session, userMessage, contextData, openAIChatURL, "OpenAI")
+}
 
+// generateChatCompletionsResponse calls any OpenAI-compatible Chat Completions
+// endpoint. OpenRouter speaks this format and routes to hundreds of models by
+// ID (e.g. "anthropic/claude-sonnet-5"), so settings.AI.Model is passed through
+// verbatim rather than validated against a fixed list.
+func (a *App) generateChatCompletionsResponse(settings *models.ChatbotSettings, session *models.ChatbotSession, userMessage, contextData, url, providerName string) (string, error) {
 	// Build messages array
 	messages := []map[string]string{}
 
@@ -1017,7 +1030,7 @@ func (a *App) generateOpenAIResponse(settings *models.ChatbotSettings, session *
 			} `json:"error"`
 		}
 		_ = json.Unmarshal(body, &errResp)
-		return "", fmt.Errorf("OpenAI API error: %s", errResp.Error.Message)
+		return "", fmt.Errorf("%s API error (HTTP %d): %s", providerName, resp.StatusCode, errResp.Error.Message)
 	}
 
 	var result struct {
@@ -1035,7 +1048,7 @@ func (a *App) generateOpenAIResponse(settings *models.ChatbotSettings, session *
 		return strings.TrimSpace(result.Choices[0].Message.Content), nil
 	}
 
-	return "", fmt.Errorf("no response from OpenAI")
+	return "", fmt.Errorf("no response from %s", providerName)
 }
 
 // generateAnthropicResponse generates a response using Anthropic API

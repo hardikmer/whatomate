@@ -109,8 +109,38 @@ const isAIEnabled = ref(false)
 const aiProviders = [
   { value: 'openai', label: 'OpenAI', models: ['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo', 'gpt-3.5-turbo'] },
   { value: 'anthropic', label: 'Anthropic', models: ['claude-3-5-sonnet-latest', 'claude-3-5-haiku-latest', 'claude-3-opus-latest'] },
-  { value: 'google', label: 'Google AI', models: ['gemini-2.0-flash', 'gemini-2.0-flash-lite', 'gemini-1.5-flash', 'gemini-1.5-flash-8b'] }
+  { value: 'google', label: 'Google AI', models: ['gemini-2.0-flash', 'gemini-2.0-flash-lite', 'gemini-1.5-flash', 'gemini-1.5-flash-8b'] },
+  // OpenRouter routes to hundreds of models by ID, so the model is free text.
+  // Suggestions are fetched live (see loadOpenRouterModels) instead of being
+  // hardcoded, because a fixed list goes stale as models are added and retired.
+  { value: 'openrouter', label: 'OpenRouter', models: [] as string[] }
 ]
+
+const isFreeTextModel = computed(() => aiSettings.value.ai_provider === 'openrouter')
+
+const openRouterModels = ref<string[]>([])
+let openRouterModelsRequested = false
+
+// OpenRouter's model list is public (no key) and CORS-enabled. Failure is
+// harmless: the field still accepts any model ID typed by hand.
+async function loadOpenRouterModels() {
+  if (openRouterModelsRequested) return
+  openRouterModelsRequested = true
+  try {
+    const res = await fetch('https://openrouter.ai/api/v1/models')
+    if (!res.ok) return
+    const body = await res.json()
+    openRouterModels.value = (body.data || [])
+      .map((m: { id: string }) => m.id)
+      .sort()
+  } catch {
+    openRouterModelsRequested = false
+  }
+}
+
+watch(() => aiSettings.value.ai_provider, (provider) => {
+  if (provider === 'openrouter') loadOpenRouterModels()
+}, { immediate: true })
 
 const availableModels = computed(() => {
   const provider = aiProviders.find(p => p.value === aiSettings.value.ai_provider)
@@ -840,7 +870,22 @@ function removeEscalationUser(userId: string) {
                     </div>
                     <div class="space-y-2">
                       <Label>{{ $t('chatbotSettings.model') }}</Label>
-                      <Select v-model="aiSettings.ai_model" :disabled="!aiSettings.ai_provider">
+                      <template v-if="isFreeTextModel">
+                        <Input
+                          v-model="aiSettings.ai_model"
+                          list="openrouter-models"
+                          placeholder="anthropic/claude-sonnet-5"
+                          autocomplete="off"
+                        />
+                        <datalist id="openrouter-models">
+                          <option v-for="model in openRouterModels" :key="model" :value="model" />
+                        </datalist>
+                        <p class="text-xs text-muted-foreground">
+                          {{ $t('chatbotSettings.openRouterModelHint') }}
+                          <a href="https://openrouter.ai/models" target="_blank" rel="noopener noreferrer" class="underline">openrouter.ai/models</a>
+                        </p>
+                      </template>
+                      <Select v-else v-model="aiSettings.ai_model" :disabled="!aiSettings.ai_provider">
                         <SelectTrigger>
                           <SelectValue :placeholder="$t('chatbotSettings.selectModel') + '...'" />
                         </SelectTrigger>

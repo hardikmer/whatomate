@@ -1831,6 +1831,7 @@
     "selectProvider": "Select provider",
     "model": "Model",
     "selectModel": "Select model",
+    "openRouterModelHint": "Type any OpenRouter model ID, or pick from the list. Browse and compare prices at",
     "apiKey": "API Key",
     "apiKeyPlaceholder": "Enter API key (leave empty to keep existing)",
     "apiKeyHint": "Your API key is encrypted and stored securely",
