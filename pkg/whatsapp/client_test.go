@@ -476,3 +476,74 @@ func (t *testServerTransport) RoundTrip(req *http.Request) (*http.Response, erro
 	testReq.URL.Host = t.serverURL[7:] // Remove "http://"
 	return http.DefaultTransport.RoundTrip(testReq)
 }
+
+func TestClient_SendTextMessage_RetriesTransientMetaError(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		errorCode int
+		wantCalls int
+		wantErr   bool
+	}{
+		{name: "131000 something went wrong is retried", errorCode: 131000, wantCalls: 2},
+		{name: "131016 service unavailable is retried", errorCode: 131016, wantCalls: 2},
+		{name: "131047 outside 24h window is not retried", errorCode: 131047, wantCalls: 1, wantErr: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			calls := 0
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				calls++
+				var body map[string]any
+				require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+				assert.Equal(t, "Hi", body["text"].(map[string]any)["body"], "body must be resent intact")
+				w.Header().Set("Content-Type", "application/json")
+				if calls == 1 {
+					w.WriteHeader(http.StatusInternalServerError)
+					_ = json.NewEncoder(w).Encode(map[string]any{
+						"error": map[string]any{"message": "failure", "code": tt.errorCode},
+					})
+					return
+				}
+				_ = json.NewEncoder(w).Encode(map[string]any{
+					"messages": []map[string]any{{"id": "wamid.retry"}},
+				})
+			}))
+			defer server.Close()
+
+			client := whatsapp.NewWithBaseURL(testutil.NopLogger(), server.URL)
+			id, err := client.SendTextMessage(testutil.TestContext(t), testAccount(server.URL), whatsapp.Recipient{Phone: "1234567890"}, "Hi")
+
+			assert.Equal(t, tt.wantCalls, calls)
+			if tt.wantErr {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, "wamid.retry", id)
+		})
+	}
+}
+
+func TestClient_SendTextMessage_GivesUpAfterRetries(t *testing.T) {
+	t.Parallel()
+	calls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"error": map[string]any{"message": "Something went wrong", "code": 131000},
+		})
+	}))
+	defer server.Close()
+
+	client := whatsapp.NewWithBaseURL(testutil.NopLogger(), server.URL)
+	_, err := client.SendTextMessage(testutil.TestContext(t), testAccount(server.URL), whatsapp.Recipient{Phone: "1234567890"}, "Hi")
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "131000")
+	assert.Equal(t, 3, calls, "one attempt plus two retries")
+}

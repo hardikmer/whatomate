@@ -24,6 +24,33 @@ type Client struct {
 	HTTPClient *http.Client
 	Log        logf.Logger
 	baseURL    string // For testing with mock servers
+	// retryDelays are the waits before each retry of a request Meta rejected
+	// with a transient error (see isTransientMetaError). Its length is the
+	// number of retries.
+	retryDelays []time.Duration
+}
+
+// defaultRetryDelays: Meta's transient errors (131000 "Something went wrong")
+// usually clear within seconds. Without a retry the reply is simply lost and
+// the customer waits until someone notices the failed message.
+var defaultRetryDelays = []time.Duration{2 * time.Second, 5 * time.Second}
+
+// transientMetaErrorCodes are Meta error codes that mean "temporary problem
+// on Meta's side, try again". Meta rejected the request, so retrying cannot
+// send a message twice.
+var transientMetaErrorCodes = map[int]bool{
+	1:      true, // API Unknown
+	2:      true, // API Service (temporary downtime)
+	131000: true, // Something went wrong
+	131016: true, // Service unavailable
+}
+
+func isTransientMetaError(respBody []byte) bool {
+	var apiErr MetaAPIError
+	if err := json.Unmarshal(respBody, &apiErr); err != nil {
+		return false
+	}
+	return transientMetaErrorCodes[apiErr.Error.Code]
 }
 
 // New creates a new WhatsApp client
@@ -32,8 +59,9 @@ func New(log logf.Logger) *Client {
 		HTTPClient: &http.Client{
 			Timeout: DefaultTimeout,
 		},
-		Log:     log,
-		baseURL: BaseURL,
+		Log:         log,
+		baseURL:     BaseURL,
+		retryDelays: defaultRetryDelays,
 	}
 }
 
@@ -43,8 +71,9 @@ func NewWithTimeout(log logf.Logger, timeout time.Duration) *Client {
 		HTTPClient: &http.Client{
 			Timeout: timeout,
 		},
-		Log:     log,
-		baseURL: BaseURL,
+		Log:         log,
+		baseURL:     BaseURL,
+		retryDelays: defaultRetryDelays,
 	}
 }
 
@@ -54,8 +83,9 @@ func NewWithBaseURL(log logf.Logger, baseURL string) *Client {
 		HTTPClient: &http.Client{
 			Timeout: DefaultTimeout,
 		},
-		Log:     log,
-		baseURL: baseURL,
+		Log:         log,
+		baseURL:     baseURL,
+		retryDelays: []time.Duration{10 * time.Millisecond, 10 * time.Millisecond},
 	}
 }
 
@@ -67,20 +97,48 @@ func (c *Client) getBaseURL() string {
 	return BaseURL
 }
 
-// doRequest performs an HTTP request to the Meta API
+// doRequest performs an HTTP request to the Meta API, retrying when Meta
+// answers with a transient error.
 func (c *Client) doRequest(ctx context.Context, method, url string, body any, accessToken string) ([]byte, error) {
-	var reqBody io.Reader
+	var jsonBody []byte
 	if body != nil {
-		jsonBody, err := json.Marshal(body)
+		var err error
+		jsonBody, err = json.Marshal(body)
 		if err != nil {
 			return nil, fmt.Errorf("failed to marshal request body: %w", err)
 		}
-		reqBody = bytes.NewBuffer(jsonBody)
+	}
+
+	for attempt := 0; ; attempt++ {
+		statusCode, respBody, err := c.doRequestOnce(ctx, method, url, jsonBody, accessToken)
+		if err != nil {
+			return nil, err
+		}
+		if statusCode == http.StatusOK {
+			return respBody, nil
+		}
+		if attempt >= len(c.retryDelays) || !isTransientMetaError(respBody) {
+			return nil, ParseMetaAPIError(statusCode, respBody)
+		}
+		c.Log.Warn("Transient Meta API error, retrying", "status", statusCode,
+			"attempt", attempt+1, "error", ParseMetaAPIError(statusCode, respBody))
+		select {
+		case <-ctx.Done():
+			return nil, ParseMetaAPIError(statusCode, respBody)
+		case <-time.After(c.retryDelays[attempt]):
+		}
+	}
+}
+
+func (c *Client) doRequestOnce(ctx context.Context, method, url string, jsonBody []byte, accessToken string) (int, []byte, error) {
+	var reqBody io.Reader
+	if jsonBody != nil {
+		reqBody = bytes.NewReader(jsonBody)
 	}
 
 	req, err := http.NewRequestWithContext(ctx, method, url, reqBody)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
+		return 0, nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
 	req.Header.Set("Authorization", "Bearer "+accessToken)
@@ -88,20 +146,15 @@ func (c *Client) doRequest(ctx context.Context, method, url string, body any, ac
 
 	resp, err := c.HTTPClient.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("request failed: %w", err)
+		return 0, nil, fmt.Errorf("request failed: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read response body: %w", err)
+		return 0, nil, fmt.Errorf("failed to read response body: %w", err)
 	}
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, ParseMetaAPIError(resp.StatusCode, respBody)
-	}
-
-	return respBody, nil
+	return resp.StatusCode, respBody, nil
 }
 
 // doJSON performs an HTTP request to the Meta API and unmarshals the JSON
