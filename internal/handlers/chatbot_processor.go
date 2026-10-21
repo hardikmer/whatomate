@@ -380,13 +380,14 @@ func (a *App) processIncomingMessageFull(phoneNumberID string, msg IncomingTextM
 				}
 				a.logSessionMessage(session.ID, models.DirectionOutgoing, aiResponse, "ai_response")
 			}
-			for _, action := range actions {
+			if len(actions) > 0 {
 				a.DispatchWebhook(account.OrganizationID, models.WebhookEventAIAction, AIActionEventData{
 					ContactID:       contact.ID.String(),
 					ContactPhone:    contact.PhoneNumber,
 					ContactName:     contact.ProfileName,
 					WhatsAppAccount: account.Name,
-					Action:          action,
+					Action:          actions[0],
+					Actions:         actions,
 				})
 			}
 			if handoff {

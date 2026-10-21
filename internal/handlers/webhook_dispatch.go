@@ -72,6 +72,10 @@ type AIActionEventData struct {
 	ContactName     string         `json:"contact_name"`
 	WhatsAppAccount string         `json:"whatsapp_account"`
 	Action          map[string]any `json:"action"`
+	// Actions holds every action from the same reply (Action is the first).
+	// They are sent as one event so a receiver can apply them in a single
+	// write instead of racing several near-simultaneous deliveries.
+	Actions []map[string]any `json:"actions"`
 }
 
 // maxConcurrentWebhooks limits the number of concurrent webhook deliveries per dispatch
