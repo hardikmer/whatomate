@@ -1217,13 +1217,15 @@ func (a *App) saveAndFinalizeTransfer(transfer *models.AgentTransfer, account *m
 	// an integration can alert a human; manual ones dispatch in
 	// CreateAgentTransfer. With no notes, the reason is the contact's last
 	// message, which is usually what needs a human.
+	var lastMessage string
+	var last models.Message
+	if err := a.DB.Where("contact_id = ? AND direction = ?", contact.ID, models.DirectionIncoming).
+		Order("created_at DESC").First(&last).Error; err == nil {
+		lastMessage = last.Content
+	}
 	reason := transfer.Notes
 	if reason == "" {
-		var last models.Message
-		if err := a.DB.Where("contact_id = ? AND direction = ?", contact.ID, models.DirectionIncoming).
-			Order("created_at DESC").First(&last).Error; err == nil {
-			reason = last.Content
-		}
+		reason = lastMessage
 	}
 	var agentID *string
 	if transfer.AgentID != nil {
@@ -1237,6 +1239,7 @@ func (a *App) saveAndFinalizeTransfer(transfer *models.AgentTransfer, account *m
 		ContactName:     contact.ProfileName,
 		Source:          transfer.Source,
 		Reason:          reason,
+		LastMessage:     lastMessage,
 		AgentID:         agentID,
 		WhatsAppAccount: transfer.WhatsAppAccount,
 	})
@@ -1246,6 +1249,12 @@ func (a *App) saveAndFinalizeTransfer(transfer *models.AgentTransfer, account *m
 
 // createTransferToQueue creates an unassigned agent transfer that goes to the queue
 func (a *App) createTransferToQueue(account *models.WhatsAppAccount, contact *models.Contact, source models.TransferSource) {
+	a.createTransferToQueueWithNotes(account, contact, source, "")
+}
+
+// createTransferToQueueWithNotes is createTransferToQueue with notes for the
+// agent, e.g. the AI's summary of why it handed off.
+func (a *App) createTransferToQueueWithNotes(account *models.WhatsAppAccount, contact *models.Contact, source models.TransferSource, notes string) {
 	if a.hasActiveAgentTransfer(account.OrganizationID, contact.ID) {
 		a.Log.Debug("Contact already has active transfer, skipping", "contact_id", contact.ID, "source", source)
 		return
@@ -1274,6 +1283,7 @@ func (a *App) createTransferToQueue(account *models.WhatsAppAccount, contact *mo
 		PhoneNumber:     contact.PhoneNumber,
 		Status:          models.TransferStatusActive,
 		Source:          source,
+		Notes:           notes,
 		TransferredAt:   time.Now(),
 	}
 

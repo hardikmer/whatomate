@@ -368,7 +368,7 @@ func (a *App) processIncomingMessageFull(phoneNumberID string, msg IncomingTextM
 		a.Log.Info("Attempting AI response", "provider", settings.AI.Provider, "model", settings.AI.Model)
 		aiResponse, err := a.generateAIResponse(settings, session, messageText)
 		aiResponse, actions := extractAIActions(aiResponse)
-		aiResponse, handoff := extractAIHandoff(aiResponse)
+		aiResponse, handoff, handoffNote := extractAIHandoff(aiResponse)
 		if err != nil {
 			a.Log.Error("AI response failed", "error", err, "provider", settings.AI.Provider, "model", settings.AI.Model)
 			// Fall through to default response
@@ -390,7 +390,7 @@ func (a *App) processIncomingMessageFull(phoneNumberID string, msg IncomingTextM
 				})
 			}
 			if handoff {
-				a.createTransferToQueue(account, contact, models.TransferSourceAI)
+				a.createTransferToQueueWithNotes(account, contact, models.TransferSourceAI, handoffNote)
 			}
 			return
 		} else {
@@ -1324,28 +1324,32 @@ func extractAIActions(response string) (string, []map[string]any) {
 	return strings.TrimSpace(cleaned), actions
 }
 
-// aiHandoffMarker is the token a system prompt can tell the model to emit when
-// a human should take over. It is stripped before the reply is sent.
-const aiHandoffMarker = "[HANDOFF]"
+// aiHandoffPattern matches the token a system prompt can tell the model to
+// emit when a human should take over: [HANDOFF], or [HANDOFF: note] to tell
+// the team why. It is stripped before the reply is sent.
+var aiHandoffPattern = regexp.MustCompile(`(?i)\[HANDOFF(?:\s*:\s*([^\]]*))?\]`)
+
+// maxAIHandoffNote caps the note stored on the transfer.
+const maxAIHandoffNote = 500
 
 // extractAIHandoff removes every handoff marker from an AI reply and reports
-// whether one was present.
-func extractAIHandoff(response string) (string, bool) {
-	upper := strings.ToUpper(response)
-	if !strings.Contains(upper, aiHandoffMarker) {
-		return response, false
+// whether one was present, plus the note of the first marker that has one.
+func extractAIHandoff(response string) (string, bool, string) {
+	matches := aiHandoffPattern.FindAllStringSubmatch(response, -1)
+	if len(matches) == 0 {
+		return response, false, ""
 	}
-	var b strings.Builder
-	for {
-		i := strings.Index(strings.ToUpper(response), aiHandoffMarker)
-		if i < 0 {
-			b.WriteString(response)
+	var note string
+	for _, m := range matches {
+		if n := strings.TrimSpace(m[1]); n != "" {
+			note = n
 			break
 		}
-		b.WriteString(response[:i])
-		response = response[i+len(aiHandoffMarker):]
 	}
-	return strings.TrimSpace(b.String()), true
+	if r := []rune(note); len(r) > maxAIHandoffNote {
+		note = string(r[:maxAIHandoffNote])
+	}
+	return strings.TrimSpace(aiHandoffPattern.ReplaceAllString(response, "")), true, note
 }
 
 // maskPhoneKeepCountryCode keeps the leading digits (country code) and the last

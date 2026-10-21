@@ -15,20 +15,25 @@ func TestExtractAIHandoff(t *testing.T) {
 		in       string
 		want     string
 		wantFlag bool
+		wantNote string
 	}{
-		{"no marker", "Our next batch starts soon.", "Our next batch starts soon.", false},
-		{"marker at end", "Let me check with the team. [HANDOFF]", "Let me check with the team.", true},
-		{"marker on own line", "Let me check with the team.\n[HANDOFF]", "Let me check with the team.", true},
-		{"lower case", "One moment [handoff]", "One moment", true},
-		{"marker only", "[HANDOFF]", "", true},
-		{"repeated", "[HANDOFF] Sure. [HANDOFF]", "Sure.", true},
+		{"no marker", "Our next batch starts soon.", "Our next batch starts soon.", false, ""},
+		{"marker at end", "Let me check with the team. [HANDOFF]", "Let me check with the team.", true, ""},
+		{"marker on own line", "Let me check with the team.\n[HANDOFF]", "Let me check with the team.", true, ""},
+		{"lower case", "One moment [handoff]", "One moment", true, ""},
+		{"marker only", "[HANDOFF]", "", true, ""},
+		{"repeated", "[HANDOFF] Sure. [HANDOFF]", "Sure.", true, ""},
+		{"with note", "Dr. Mansi will message you shortly.\n[HANDOFF: WholeBrainKids - wants the 99 trial, child 3, online]", "Dr. Mansi will message you shortly.", true, "WholeBrainKids - wants the 99 trial, child 3, online"},
+		{"note lower case", "Ok [handoff:  sibling discount ]", "Ok", true, "sibling discount"},
+		{"empty note", "Ok [HANDOFF:]", "Ok", true, ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			got, flag := extractAIHandoff(tt.in)
+			got, flag, note := extractAIHandoff(tt.in)
 			assert.Equal(t, tt.want, got)
 			assert.Equal(t, tt.wantFlag, flag)
+			assert.Equal(t, tt.wantNote, note)
 		})
 	}
 }
@@ -80,7 +85,7 @@ func TestExtractAIActions(t *testing.T) {
 	assert.Contains(t, got, "[HANDOFF]")
 	assert.NotContains(t, got, "ACTION")
 	assert.Len(t, actions, 2)
-	got, handoff := extractAIHandoff(got)
+	got, handoff, _ := extractAIHandoff(got)
 	assert.Equal(t, "Thanks!", got)
 	assert.True(t, handoff)
 

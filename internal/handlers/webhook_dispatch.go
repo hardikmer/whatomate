@@ -49,15 +49,19 @@ type ContactEventData struct {
 
 // TransferEventData represents data for transfer events
 type TransferEventData struct {
-	TransferID      string                `json:"transfer_id"`
-	ContactID       string                `json:"contact_id"`
-	ContactPhone    string                `json:"contact_phone"`
-	ContactName     string                `json:"contact_name"`
-	Source          models.TransferSource `json:"source"`
-	Reason          string                `json:"reason,omitempty"`
-	AgentID         *string               `json:"agent_id,omitempty"`
-	AgentName       *string               `json:"agent_name,omitempty"`
-	WhatsAppAccount string                `json:"whatsapp_account"`
+	TransferID   string                `json:"transfer_id"`
+	ContactID    string                `json:"contact_id"`
+	ContactPhone string                `json:"contact_phone"`
+	ContactName  string                `json:"contact_name"`
+	Source       models.TransferSource `json:"source"`
+	Reason       string                `json:"reason,omitempty"`
+	// LastMessage is the contact's latest incoming message, sent with
+	// automatic transfers so an alert can show what the contact asked even
+	// when Reason carries the AI's handoff note instead.
+	LastMessage     string  `json:"last_message,omitempty"`
+	AgentID         *string `json:"agent_id,omitempty"`
+	AgentName       *string `json:"agent_name,omitempty"`
+	WhatsAppAccount string  `json:"whatsapp_account"`
 }
 
 // AIActionEventData is sent with ai.action: one structured action the AI
