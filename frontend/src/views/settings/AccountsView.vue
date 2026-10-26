@@ -159,18 +159,12 @@ function launchWhatsAppSignup(isCoexistence: boolean = true) {
     override_default_response_type: true
   }
 
-  if (isCoexistence) {
-    loginOptions.extras = {
-      setup: {},
-      featureType: 'whatsapp_business_app_onboarding',
-      sessionInfoVersion: '3',
-      version: 'v3'
-    }
-  } else {
-    loginOptions.extras = {
-      setup: {}
-    }
-  }
+  // Embedded Signup v5: WhatsApp Business app onboarding (coexistence) is on
+  // by default. v2/v3 were retired on 2026-10-15 and are now served as v4,
+  // which ignores featureType, so asking for v3 hides the coexistence screen.
+  loginOptions.extras = isCoexistence
+    ? { version: 'v5' }
+    : { version: 'v5', features: [{ name: 'whatsapp_business_app_onboarding', enabled: false }] }
 
   window.FB.login(
     (response: any) => {
