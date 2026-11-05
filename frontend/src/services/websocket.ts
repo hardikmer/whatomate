@@ -322,6 +322,8 @@ class WebSocketService {
         reply_to_message_id: payload.reply_to_message_id,
         reply_to_message: payload.reply_to_message,
         reactions: payload.reactions,
+        sender: payload.sender,
+        sender_name: payload.sender_name,
         created_at: payload.created_at,
         updated_at: payload.updated_at
       })

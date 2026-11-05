@@ -78,6 +78,8 @@ export interface Message {
   reply_to_message?: ReplyPreview
   reactions?: Reaction[]
   whatsapp_account?: string
+  sender?: 'bot' | 'phone' | 'agent' | 'template'
+  sender_name?: string
   created_at: string
   updated_at: string
 }

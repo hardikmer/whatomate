@@ -1364,6 +1364,18 @@ function getMessageStatusClass(status: string) {
   }
 }
 
+// Who sent an outgoing message: the bot, the WhatsApp Business app on the
+// phone (coexistence), an agent in Whatomate, or a template.
+function senderLabel(message: Message) {
+  switch (message.sender) {
+    case 'bot': return '🤖 Bot'
+    case 'phone': return '📱 You (phone)'
+    case 'agent': return `👤 ${message.sender_name || 'Agent'}`
+    case 'template': return `📄 Template: ${message.sender_name}`
+    default: return ''
+  }
+}
+
 function formatMessageTime(dateStr: string) {
   const date = new Date(dateStr)
   return date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })
@@ -2150,6 +2162,12 @@ async function sendMediaMessage() {
                   message.direction === 'outgoing' ? 'chat-bubble-outgoing' : 'chat-bubble-incoming'
                 ]"
               >
+                <p
+                  v-if="message.direction === 'outgoing' && senderLabel(message)"
+                  class="text-[10px] font-medium opacity-70 mb-0.5"
+                >
+                  {{ senderLabel(message) }}
+                </p>
                 <!-- Reply preview (if this message is replying to another) -->
                 <div
                   v-if="message.is_reply && message.reply_to_message"

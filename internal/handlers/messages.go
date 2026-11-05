@@ -484,6 +484,48 @@ func (a *App) finalizeMessageSend(msg *models.Message, req OutgoingMessageReques
 	}
 }
 
+// messageSender says who sent an outgoing message, for the chat view label:
+// "template", "phone" (typed in the WhatsApp Business app, coexistence echo),
+// "agent" (typed in Whatomate) or "bot". Incoming messages return "".
+func messageSender(m *models.Message, names map[uuid.UUID]string) (string, string) {
+	if m.Direction != models.DirectionOutgoing {
+		return "", ""
+	}
+	switch {
+	case m.TemplateName != "":
+		return "template", m.TemplateName
+	case m.Metadata != nil && m.Metadata["source"] == messageSourceBusinessApp:
+		return "phone", ""
+	case m.SentByUserID != nil:
+		return "agent", names[*m.SentByUserID]
+	default:
+		return "bot", ""
+	}
+}
+
+// senderNames loads the full names of the agents who sent any of messages.
+func (a *App) senderNames(messages []models.Message) map[uuid.UUID]string {
+	ids := make([]uuid.UUID, 0)
+	for _, m := range messages {
+		if m.SentByUserID != nil {
+			ids = append(ids, *m.SentByUserID)
+		}
+	}
+	names := make(map[uuid.UUID]string, len(ids))
+	if len(ids) == 0 {
+		return names
+	}
+	var users []models.User
+	if err := a.DB.Select("id", "full_name").Where("id IN ?", ids).Find(&users).Error; err != nil {
+		a.Log.Warn("Failed to load message sender names", "error", err)
+		return names
+	}
+	for _, u := range users {
+		names[u.ID] = u.FullName
+	}
+	return names
+}
+
 // broadcastNewMessage broadcasts a new message via WebSocket
 func (a *App) broadcastNewMessage(orgID uuid.UUID, msg *models.Message, contact *models.Contact) {
 	if a.WSHub == nil {
@@ -516,6 +558,10 @@ func (a *App) broadcastNewMessage(orgID uuid.UUID, msg *models.Message, contact 
 		"created_at":       msg.CreatedAt,
 		"updated_at":       msg.UpdatedAt,
 		"is_reply":         msg.IsReply,
+	}
+	if sender, name := messageSender(msg, a.senderNames([]models.Message{*msg})); sender != "" {
+		payload["sender"] = sender
+		payload["sender_name"] = name
 	}
 
 	// Add interactive data

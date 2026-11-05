@@ -63,6 +63,8 @@ type MessageResponse struct {
 	ReplyToMessage   *ReplyPreview        `json:"reply_to_message,omitempty"`
 	Reactions        []ReactionInfo       `json:"reactions,omitempty"`
 	WhatsAppAccount  string               `json:"whatsapp_account,omitempty"`
+	Sender           string               `json:"sender,omitempty"`      // outgoing only: bot, phone, agent, template
+	SenderName       string               `json:"sender_name,omitempty"` // agent's name or template name
 	CreatedAt        time.Time            `json:"created_at"`
 	UpdatedAt        time.Time            `json:"updated_at"`
 }
@@ -410,6 +412,7 @@ func (a *App) GetMessages(r *fastglue.Request) error {
 // buildMessagesResponse converts messages to response format
 func (a *App) buildMessagesResponse(messages []models.Message) []MessageResponse {
 	response := make([]MessageResponse, len(messages))
+	names := a.senderNames(messages)
 	for i, m := range messages {
 		var content any
 		if m.MessageType == models.MessageTypeText {
@@ -436,6 +439,7 @@ func (a *App) buildMessagesResponse(messages []models.Message) []MessageResponse
 			CreatedAt:       m.CreatedAt,
 			UpdatedAt:       m.UpdatedAt,
 		}
+		msgResp.Sender, msgResp.SenderName = messageSender(&m, names)
 
 		if m.IsReply && m.ReplyToMessageID != nil {
 			replyToID := m.ReplyToMessageID.String()
@@ -725,6 +729,7 @@ func (a *App) SendMessage(r *fastglue.Request) error {
 		CreatedAt:       message.CreatedAt,
 		UpdatedAt:       message.UpdatedAt,
 	}
+	response.Sender, response.SenderName = messageSender(message, a.senderNames([]models.Message{*message}))
 
 	// Add reply context to response
 	if message.IsReply && message.ReplyToMessageID != nil && replyToMessage != nil {
