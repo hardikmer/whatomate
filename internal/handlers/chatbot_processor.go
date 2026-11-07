@@ -385,7 +385,7 @@ func (a *App) processIncomingMessageFull(phoneNumberID string, msg IncomingTextM
 		if err != nil {
 			a.Log.Error("AI response failed", "error", err, "provider", settings.AI.Provider, "model", settings.AI.Model)
 			// Fall through to default response
-		} else if aiResponse != "" || handoff {
+		} else if aiResponse = trimEmptyReply(aiResponse); aiResponse != "" || handoff {
 			a.Log.Info("AI response generated successfully", "response_length", len(aiResponse), "handoff", handoff)
 			if aiResponse != "" {
 				if err := a.sendAndSaveTextMessage(account, contact, aiResponse); err != nil {
@@ -1035,7 +1035,7 @@ func (a *App) generateChatCompletionsResponse(settings *models.ChatbotSettings, 
 
 	// Add conversation history if enabled
 	if settings.AI.IncludeHistory && session != nil {
-		history := a.getAIHistory(session.ID, settings.AI.HistoryLimit, userMessage)
+		history := a.getAIHistory(session, settings.AI.HistoryLimit, userMessage)
 		for _, msg := range history {
 			role := "user"
 			if msg.Direction == models.DirectionOutgoing {
@@ -1122,7 +1122,7 @@ func (a *App) generateAnthropicResponse(settings *models.ChatbotSettings, sessio
 
 	// Add conversation history if enabled
 	if settings.AI.IncludeHistory && session != nil {
-		history := a.getAIHistory(session.ID, settings.AI.HistoryLimit, userMessage)
+		history := a.getAIHistory(session, settings.AI.HistoryLimit, userMessage)
 		for _, msg := range history {
 			role := "user"
 			if msg.Direction == models.DirectionOutgoing {
@@ -1227,7 +1227,7 @@ func (a *App) generateGoogleResponse(settings *models.ChatbotSettings, session *
 
 	// Add conversation history if enabled
 	if settings.AI.IncludeHistory && session != nil {
-		history := a.getAIHistory(session.ID, settings.AI.HistoryLimit, userMessage)
+		history := a.getAIHistory(session, settings.AI.HistoryLimit, userMessage)
 		for _, msg := range history {
 			role := "user"
 			if msg.Direction == models.DirectionOutgoing {
@@ -1405,8 +1405,57 @@ func maskPhoneKeepCountryCode(phone string) string {
 // message is logged to the session before the AI is called, and every
 // provider appends it again as the current turn, so drop that trailing copy
 // rather than sending the user's message twice.
-func (a *App) getAIHistory(sessionID uuid.UUID, limit int, userMessage string) []models.ChatbotSessionMessage {
-	return trimCurrentMessage(a.getSessionHistory(sessionID, limit+1), userMessage, limit)
+//
+// It reads the contact's whole chat from the messages table, not just the
+// chatbot session, so the AI also sees templates, messages sent through the
+// API, replies typed by agents or on the phone (coexistence), and anything
+// from before the current session started.
+func (a *App) getAIHistory(session *models.ChatbotSession, limit int, userMessage string) []models.ChatbotSessionMessage {
+	var rows []models.Message
+	a.DB.Where("contact_id = ? AND whats_app_account = ?", session.ContactID, session.WhatsAppAccount).
+		Order("created_at DESC").
+		Limit(limit + 1).
+		Find(&rows)
+	if len(rows) == 0 {
+		return trimCurrentMessage(a.getSessionHistory(session.ID, limit+1), userMessage, limit)
+	}
+	history := make([]models.ChatbotSessionMessage, 0, len(rows))
+	for i := len(rows) - 1; i >= 0; i-- {
+		text := strings.TrimSpace(rows[i].Content)
+		if rows[i].MessageType != models.MessageTypeText && rows[i].MessageType != "" {
+			if text == "" {
+				text = "[" + string(rows[i].MessageType) + "]"
+			}
+		}
+		if text == "" {
+			continue
+		}
+		history = append(history, models.ChatbotSessionMessage{Direction: rows[i].Direction, Message: text})
+	}
+	return mergeConsecutive(trimCurrentMessage(history, userMessage, limit))
+}
+
+// trimEmptyReply returns "" for a reply left with only punctuation (e.g. "."
+// after the markers were stripped), so it isn't sent to the parent.
+func trimEmptyReply(reply string) string {
+	if strings.Trim(reply, " \t\r\n.,!?-…") == "" {
+		return ""
+	}
+	return reply
+}
+
+// mergeConsecutive joins back-to-back messages in the same direction, since
+// some AI APIs require user and assistant turns to alternate.
+func mergeConsecutive(history []models.ChatbotSessionMessage) []models.ChatbotSessionMessage {
+	out := make([]models.ChatbotSessionMessage, 0, len(history))
+	for _, m := range history {
+		if n := len(out); n > 0 && out[n-1].Direction == m.Direction {
+			out[n-1].Message += "\n\n" + m.Message
+			continue
+		}
+		out = append(out, m)
+	}
+	return out
 }
 
 // trimCurrentMessage drops a trailing incoming message equal to userMessage
