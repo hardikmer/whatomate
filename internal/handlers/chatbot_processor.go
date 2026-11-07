@@ -369,6 +369,12 @@ func (a *App) processIncomingMessageFull(phoneNumberID string, msg IncomingTextM
 		aiResponse, err := a.generateAIResponse(settings, session, messageText)
 		aiResponse, actions := extractAIActions(aiResponse)
 		aiResponse, handoff, handoffNote := extractAIHandoff(aiResponse)
+		if err == nil && aiNoReplyPattern.MatchString(aiResponse) {
+			// The prompt decided this message needs no answer (e.g. another
+			// business's auto-reply). Send nothing, not even the fallback.
+			a.Log.Info("AI chose not to reply", "contact", contact.PhoneNumber)
+			return
+		}
 		if err != nil {
 			a.Log.Error("AI response failed", "error", err, "provider", settings.AI.Provider, "model", settings.AI.Model)
 			// Fall through to default response
@@ -1329,6 +1335,11 @@ func extractAIActions(response string) (string, []map[string]any) {
 // emit when a human should take over: [HANDOFF], or [HANDOFF: note] to tell
 // the team why. It is stripped before the reply is sent.
 var aiHandoffPattern = regexp.MustCompile(`(?i)\[HANDOFF(?:\s*:\s*([^\]]*))?\]`)
+
+// aiNoReplyPattern matches the token a system prompt can tell the model to
+// emit when a message should get no answer at all, such as an automated
+// away message from another business. The whole reply is then dropped.
+var aiNoReplyPattern = regexp.MustCompile(`(?i)\[NO_REPLY\]`)
 
 // maxAIHandoffNote caps the note stored on the transfer.
 const maxAIHandoffNote = 500
