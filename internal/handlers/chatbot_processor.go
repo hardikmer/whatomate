@@ -365,6 +365,13 @@ func (a *App) processIncomingMessageFull(phoneNumberID string, msg IncomingTextM
 
 	// If no keyword matched, try AI response if enabled
 	if settings.AI.Enabled && settings.AI.Provider != "" && settings.AI.APIKey != "" {
+		if a.newerIncomingArrives(contact.ID, msg.ID) {
+			// The parent sent another message (or tapped a second button)
+			// straight after this one. Its handler answers both together,
+			// with this message already in the history.
+			a.Log.Info("Newer message arrived, leaving the AI reply to it", "contact", contact.PhoneNumber)
+			return
+		}
 		a.Log.Info("Attempting AI response", "provider", settings.AI.Provider, "model", settings.AI.Model)
 		aiResponse, err := a.generateAIResponse(settings, session, messageText)
 		aiResponse, actions := extractAIActions(aiResponse)
@@ -436,6 +443,25 @@ func (a *App) processIncomingMessageFull(phoneNumberID string, msg IncomingTextM
 	} else if !isNewSession {
 		a.Log.Info("No fallback message configured for existing session")
 	}
+}
+
+// aiReplyDebounce is how long an AI reply waits for a follow-up message from
+// the same contact, so quick taps or split messages get one combined answer.
+var aiReplyDebounce = 4 * time.Second
+
+// newerIncomingArrives waits aiReplyDebounce and reports whether the contact
+// has sent a later message than whatsappMsgID in the meantime.
+func (a *App) newerIncomingArrives(contactID uuid.UUID, whatsappMsgID string) bool {
+	if aiReplyDebounce <= 0 || whatsappMsgID == "" {
+		return false
+	}
+	time.Sleep(aiReplyDebounce)
+	var latest models.Message
+	if err := a.DB.Where("contact_id = ? AND direction = ?", contactID, models.DirectionIncoming).
+		Order("created_at DESC").First(&latest).Error; err != nil {
+		return false
+	}
+	return latest.WhatsAppMessageID != "" && latest.WhatsAppMessageID != whatsappMsgID
 }
 
 // KeywordResponse holds the response content and optional buttons
