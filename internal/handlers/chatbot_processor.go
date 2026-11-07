@@ -376,6 +376,13 @@ func (a *App) processIncomingMessageFull(phoneNumberID string, msg IncomingTextM
 		aiResponse, err := a.generateAIResponse(settings, session, messageText)
 		aiResponse, actions := extractAIActions(aiResponse)
 		aiResponse, handoff, handoffNote := extractAIHandoff(aiResponse)
+		if !handoff && aiPromisesHumanPattern.MatchString(aiResponse) {
+			// The reply tells the contact a person will follow up but the
+			// model left out the marker. Hand off anyway, so the promise
+			// reaches a human instead of being silently dropped.
+			a.Log.Info("AI reply promises a human without a handoff marker, handing off", "contact", contact.PhoneNumber)
+			handoff = true
+		}
 		if err == nil && aiNoReplyPattern.MatchString(aiResponse) {
 			// The prompt decided this message needs no answer (e.g. another
 			// business's auto-reply). Send nothing, not even the fallback.
@@ -1389,6 +1396,11 @@ func extractAIHandoff(response string) (string, bool, string) {
 	}
 	return strings.TrimSpace(aiHandoffPattern.ReplaceAllString(response, "")), true, note
 }
+
+// aiPromisesHumanPattern matches replies that tell the contact a person will
+// get back to them ("someone from our team will message you", "let me check
+// with the team"), which must always come with a handoff.
+var aiPromisesHumanPattern = regexp.MustCompile(`(?i)(someone from (our|the) team|team member (will|can)|(team|someone) will (message|reply|call|contact|get back|confirm|send)|check (this |that |it )?with (our|the) team|pass(ed|ing)? (this|it|that)( on)? to (our|the) team)`)
 
 // maskPhoneKeepCountryCode keeps the leading digits (country code) and the last
 // two, unlike utils.MaskPhoneNumber which hides the country code,

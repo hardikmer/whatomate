@@ -99,3 +99,25 @@ func TestExtractAIActions(t *testing.T) {
 	assert.Equal(t, "Plain reply", got)
 	assert.Nil(t, actions)
 }
+
+func TestAIPromisesHumanPattern(t *testing.T) {
+	for _, s := range []string{
+		"Of course, let me get someone from our team to message you here.",
+		"Sure, I'll check with the team whether turtle graphics is covered.",
+		"Understood, I've passed this to the team now.",
+		"The team will confirm the exact amount.",
+	} {
+		if !aiPromisesHumanPattern.MatchString(s) {
+			t.Errorf("should match: %q", s)
+		}
+	}
+	for _, s := range []string{
+		"We'll message you here as soon as the next demo is planned.",
+		"The class link will come here on WhatsApp 1 to 2 hours before.",
+		"Our team of software engineers teaches live.",
+	} {
+		if aiPromisesHumanPattern.MatchString(s) {
+			t.Errorf("should not match: %q", s)
+		}
+	}
+}
