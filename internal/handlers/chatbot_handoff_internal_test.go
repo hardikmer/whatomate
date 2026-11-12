@@ -121,3 +121,12 @@ func TestAIPromisesHumanPattern(t *testing.T) {
 		}
 	}
 }
+
+func TestHumanOnlyTag(t *testing.T) {
+	if got := humanOnlyTag(models.JSONBArray{"vip", " Student "}); got != " Student " {
+		t.Errorf("got %q", got)
+	}
+	if got := humanOnlyTag(models.JSONBArray{"lead", 3}); got != "" {
+		t.Errorf("got %q", got)
+	}
+}

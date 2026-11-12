@@ -131,6 +131,7 @@ const (
 	TransferSourceKeyword         TransferSource = "keyword"
 	TransferSourceChatbotDisabled TransferSource = "chatbot_disabled"
 	TransferSourceAI              TransferSource = "ai"
+	TransferSourceTag             TransferSource = "tag" // contact has a human-only tag
 )
 
 // CampaignStatus represents bulk message campaign states

@@ -204,6 +204,14 @@ func (a *App) processIncomingMessageFull(phoneNumberID string, msg IncomingTextM
 		return
 	}
 
+	// Contacts tagged for people only (e.g. parents of current students) never
+	// get bot replies: their messages go straight to the agent queue.
+	if tag := humanOnlyTag(contact.Tags); tag != "" {
+		a.Log.Info("Contact is tagged for humans only, handing off", "contact", contact.PhoneNumber, "tag", tag)
+		a.createTransferToQueueWithNotes(account, contact, models.TransferSourceTag, "Tagged "+tag)
+		return
+	}
+
 	// Check if chatbot is enabled for this account (use cache)
 	settings, err := a.getChatbotSettingsCached(account.OrganizationID, account.Name)
 	if err != nil {
@@ -400,6 +408,7 @@ func (a *App) processIncomingMessageFull(phoneNumberID string, msg IncomingTextM
 				}
 				a.logSessionMessage(session.ID, models.DirectionOutgoing, aiResponse, "ai_response")
 			}
+			a.applyAITagActions(contact, actions)
 			if len(actions) > 0 {
 				a.DispatchWebhook(account.OrganizationID, models.WebhookEventAIAction, AIActionEventData{
 					ContactID:       contact.ID.String(),
@@ -450,6 +459,62 @@ func (a *App) processIncomingMessageFull(phoneNumberID string, msg IncomingTextM
 	} else if !isNewSession {
 		a.Log.Info("No fallback message configured for existing session")
 	}
+}
+
+// applyAITagActions adds the tags from [[ACTION {"type":"add_tag","tag":"x"}]]
+// markers to the contact, e.g. so a parent who says their child is already
+// enrolled gets the human-only "student" tag.
+func (a *App) applyAITagActions(contact *models.Contact, actions []map[string]any) {
+	tags := contact.Tags
+	changed := false
+	for _, act := range actions {
+		tag, _ := act["tag"].(string)
+		tag = strings.TrimSpace(tag)
+		if act["type"] != "add_tag" || tag == "" || len(tag) > 50 {
+			continue
+		}
+		has := false
+		for _, t := range tags {
+			if s, ok := t.(string); ok && strings.EqualFold(s, tag) {
+				has = true
+				break
+			}
+		}
+		if !has {
+			tags = append(tags, tag)
+			changed = true
+		}
+	}
+	if !changed {
+		return
+	}
+	if err := a.DB.Model(contact).Update("tags", tags).Error; err != nil {
+		a.Log.Error("Failed to add AI tag", "error", err, "contact", contact.PhoneNumber)
+		return
+	}
+	contact.Tags = tags
+	a.Log.Info("AI added contact tags", "contact", contact.PhoneNumber, "tags", tags)
+}
+
+// humanOnlyTags are contact tags that keep the chatbot out of a chat, so a
+// person always answers (e.g. parents of enrolled students).
+var humanOnlyTags = []string{"student", "human-only"}
+
+// humanOnlyTag returns the first of the contact's tags that is in
+// humanOnlyTags (case-insensitive), or "".
+func humanOnlyTag(tags models.JSONBArray) string {
+	for _, t := range tags {
+		s, ok := t.(string)
+		if !ok {
+			continue
+		}
+		for _, h := range humanOnlyTags {
+			if strings.EqualFold(strings.TrimSpace(s), h) {
+				return s
+			}
+		}
+	}
+	return ""
 }
 
 // aiReplyDebounce is how long an AI reply waits for a follow-up message from
