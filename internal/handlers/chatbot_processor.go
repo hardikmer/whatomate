@@ -380,8 +380,19 @@ func (a *App) processIncomingMessageFull(phoneNumberID string, msg IncomingTextM
 			a.Log.Info("Newer message arrived, leaving the AI reply to it", "contact", contact.PhoneNumber)
 			return
 		}
+		if a.teamRepliedFromPhone(contact.ID) {
+			// Someone on the team is chatting with this contact from the
+			// WhatsApp Business app. Stay quiet so we don't talk over them.
+			a.Log.Info("Team is replying from the phone, AI stays quiet", "contact", contact.PhoneNumber)
+			return
+		}
 		a.Log.Info("Attempting AI response", "provider", settings.AI.Provider, "model", settings.AI.Model)
 		aiResponse, err := a.generateAIResponse(settings, session, messageText)
+		if a.teamRepliedFromPhone(contact.ID) {
+			// The team replied while the AI was writing; drop its answer.
+			a.Log.Info("Team replied from the phone during AI generation, dropping AI reply", "contact", contact.PhoneNumber)
+			return
+		}
 		aiResponse, actions := extractAIActions(aiResponse)
 		aiResponse, handoff, handoffNote := extractAIHandoff(aiResponse)
 		if !handoff && aiPromisesHumanPattern.MatchString(aiResponse) {
@@ -534,6 +545,24 @@ func (a *App) newerIncomingArrives(contactID uuid.UUID, whatsappMsgID string) bo
 		return false
 	}
 	return latest.WhatsAppMessageID != "" && latest.WhatsAppMessageID != whatsappMsgID
+}
+
+// teamQuietPeriod is how long the AI stays out of a chat after someone on
+// the team has typed a message in the WhatsApp Business app.
+var teamQuietPeriod = 2 * time.Hour
+
+// teamRepliedFromPhone reports whether a coexistence echo (a message typed in
+// the WhatsApp Business app) went to this contact within teamQuietPeriod.
+func (a *App) teamRepliedFromPhone(contactID uuid.UUID) bool {
+	if teamQuietPeriod <= 0 {
+		return false
+	}
+	var count int64
+	a.DB.Model(&models.Message{}).
+		Where("contact_id = ? AND direction = ? AND created_at > ? AND metadata->>'source' = ?",
+			contactID, models.DirectionOutgoing, time.Now().Add(-teamQuietPeriod), messageSourceBusinessApp).
+		Count(&count)
+	return count > 0
 }
 
 // KeywordResponse holds the response content and optional buttons
